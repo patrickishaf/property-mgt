@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -37,5 +36,5 @@ func main() {
 	logger.Debug("interrupt signal received. shutting down system")
 	cacheClient.Client().Close()
 	connPool.Close()
-	fmt.Println("process exited with code 0")
+	os.Exit(0)
 }

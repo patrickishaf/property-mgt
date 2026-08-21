@@ -7,7 +7,6 @@ type RedisConfig struct {
 	Host     string `envconfig:"REDIS_HOST"`
 	Password string `envconfig:"REDIS_PASSWORD"`
 	Port     int    `envconfig:"REDIS_PORT"`
-	Protocol int    `envconfig:"REDIS_PROTOCOL"`
 	Url      string `envconfig:"REDIS_URL"`
 	User     string `envconfig:"REDIS_USER"`
 }
