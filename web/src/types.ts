@@ -43,6 +43,9 @@ export interface DemoAccount {
   id: string;
   role: Role;
   name: string;
+  email: string;
+  phone: string;
+  password: string;
   tenantId?: string;
   managerId?: string;
 }

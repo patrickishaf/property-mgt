@@ -8,12 +8,27 @@ import { TenantsList, TenantDetail } from './components/Tenants';
 import { PaymentsLog } from './components/PaymentsLog';
 import { DueDates } from './components/DueDates';
 import { TenantHome } from './components/TenantHome';
+import { CreateAccount } from './components/CreateAccount';
+import { Building, Loader2 } from 'lucide-react';
 
 function Dashboard() {
-  const { account } = useApp();
+  const { account, authReady } = useApp();
   const [page, setPage] = useState<Page>('overview');
   const [selectedProperty, setSelectedProperty] = useState<string | null>(null);
   const [selectedTenant, setSelectedTenant] = useState<string | null>(null);
+
+  if (!authReady) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-10 h-10 bg-brand-600 flex items-center justify-center">
+            <Building size={20} className="text-white" />
+          </div>
+          <Loader2 size={20} className="animate-spin text-gray-400" />
+        </div>
+      </div>
+    );
+  }
 
   if (!account) return <Login />;
 
@@ -57,6 +72,8 @@ function Dashboard() {
         return <PaymentsLog />;
       case 'due-dates':
         return <DueDates />;
+      case 'create-account':
+        return <CreateAccount />;
       default:
         return <Overview onNavigate={navigate} />;
     }

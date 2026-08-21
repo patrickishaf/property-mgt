@@ -1,10 +1,10 @@
 import type { Property, Unit, Tenant, Payment, DemoAccount } from './types';
 
 export const demoAccounts: DemoAccount[] = [
-  { id: 'acc-owner', role: 'owner', name: 'Daniel Okoro' },
-  { id: 'acc-mgr-1', role: 'manager', name: 'Grace Mensah', managerId: 'mgr-1' },
-  { id: 'acc-tenant-1', role: 'tenant', name: 'Kwame Boateng', tenantId: 't-1' },
-  { id: 'acc-tenant-2', role: 'tenant', name: 'Ama Serwaa', tenantId: 't-4' },
+  { id: 'acc-owner', role: 'owner', name: 'Daniel Okoro', email: 'daniel.okoro@rentledger.com', phone: '+233 24 001 0000', password: 'owner123' },
+  { id: 'acc-mgr-1', role: 'manager', name: 'Grace Mensah', email: 'grace.mensah@rentledger.com', phone: '+233 24 001 0001', password: 'manager123', managerId: 'mgr-1' },
+  { id: 'acc-tenant-1', role: 'tenant', name: 'Kwame Boateng', email: 'kwame.b@mail.com', phone: '+233 24 001 0002', password: 'tenant123', tenantId: 't-1' },
+  { id: 'acc-tenant-2', role: 'tenant', name: 'Ama Serwaa', email: 'ama.s@mail.com', phone: '+233 24 001 0003', password: 'tenant123', tenantId: 't-4' },
 ];
 
 export const properties: Property[] = [

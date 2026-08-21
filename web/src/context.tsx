@@ -1,13 +1,18 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { DemoAccount, Payment, Role } from './types';
-import { demoAccounts, payments as seedPayments } from './data';
+import { payments as seedPayments } from './data';
 import { generatePaymentReference, TODAY } from './lib';
+import { mockAuth } from './mockAuth';
 
 interface AppState {
   account: DemoAccount | null;
+  authReady: boolean;
+  authLoading: boolean;
   payments: Payment[];
   theme: 'light' | 'dark';
-  login: (account: DemoAccount) => void;
+  loginWithPassword: (identifier: string, password: string) => Promise<void>;
+  sendOtp: (identifier: string) => Promise<string>;
+  verifyOtp: (identifier: string, code: string) => Promise<void>;
   logout: () => void;
   toggleTheme: () => void;
   recordPayment: (input: {
@@ -20,60 +25,84 @@ interface AppState {
 
 const AppContext = createContext<AppState | null>(null);
 
-const STORAGE_KEY = 'rentledger-state-v1';
+const THEME_KEY = 'rentledger-theme';
 
-interface PersistedState {
-  accountId: string | null;
-  theme: 'light' | 'dark';
-}
-
-function loadPersisted(): PersistedState {
+function loadTheme(): 'light' | 'dark' {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as PersistedState;
-      return { accountId: parsed.accountId ?? null, theme: parsed.theme ?? 'light' };
-    }
+    const raw = localStorage.getItem(THEME_KEY);
+    if (raw === 'dark' || raw === 'light') return raw;
   } catch {
     // ignore
   }
-  return { accountId: null, theme: 'light' };
+  return 'light';
 }
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [persisted] = useState(loadPersisted);
-  const [account, setAccount] = useState<DemoAccount | null>(() => {
-    if (!persisted.accountId) return null;
-    return demoAccounts.find((a) => a.id === persisted.accountId) ?? null;
-  });
+  const [account, setAccount] = useState<DemoAccount | null>(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [authLoading, setAuthLoading] = useState(false);
   const [payments, setPayments] = useState<Payment[]>(seedPayments);
-  const [theme, setTheme] = useState<'light' | 'dark'>(persisted.theme);
+  const [theme, setTheme] = useState<'light' | 'dark'>(loadTheme);
 
   useEffect(() => {
     const root = document.documentElement;
     if (theme === 'dark') root.classList.add('dark');
     else root.classList.remove('dark');
-  }, [theme]);
-
-  useEffect(() => {
-    const state: PersistedState = {
-      accountId: account?.id ?? null,
-      theme,
-    };
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      localStorage.setItem(THEME_KEY, theme);
     } catch {
       // ignore
     }
-  }, [account, theme]);
+  }, [theme]);
+
+  useEffect(() => {
+    const sessionId = mockAuth.getSession();
+    if (sessionId) {
+      const acc = mockAuth.getAccountById(sessionId);
+      if (acc) setAccount(acc);
+      else mockAuth.clearSession();
+    }
+    setAuthReady(true);
+  }, []);
 
   const value = useMemo<AppState>(
     () => ({
       account,
+      authReady,
+      authLoading,
       payments,
       theme,
-      login: (acc) => setAccount(acc),
-      logout: () => setAccount(null),
+      loginWithPassword: async (identifier, password) => {
+        setAuthLoading(true);
+        try {
+          const acc = await mockAuth.loginWithPassword(identifier, password);
+          setAccount(acc);
+        } finally {
+          setAuthLoading(false);
+        }
+      },
+      sendOtp: async (identifier) => {
+        setAuthLoading(true);
+        try {
+          const { code } = await mockAuth.sendOtp(identifier);
+          return code;
+        } finally {
+          setAuthLoading(false);
+        }
+      },
+      verifyOtp: async (identifier, code) => {
+        setAuthLoading(true);
+        try {
+          const acc = await mockAuth.verifyOtp(identifier, code);
+          setAccount(acc);
+        } finally {
+          setAuthLoading(false);
+        }
+      },
+      logout: () => {
+        mockAuth.clearSession();
+        setAccount(null);
+      },
       toggleTheme: () => setTheme((t) => (t === 'light' ? 'dark' : 'light')),
       recordPayment: ({ tenantId, amount, method, recordedBy }) => {
         const newPayment: Payment = {
@@ -88,7 +117,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setPayments((prev) => [...prev, newPayment]);
       },
     }),
-    [account, payments, theme],
+    [account, authReady, authLoading, payments, theme],
   );
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

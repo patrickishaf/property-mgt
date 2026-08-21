@@ -11,11 +11,12 @@ import {
   Menu,
   X,
   Building,
+  UserPlus,
 } from 'lucide-react';
 import { useApp, roleLabel } from '../context';
 import type { Role } from '../types';
 
-export type Page = 'overview' | 'properties' | 'tenants' | 'payments' | 'due-dates' | 'tenant-home';
+export type Page = 'overview' | 'properties' | 'tenants' | 'payments' | 'due-dates' | 'tenant-home' | 'create-account';
 
 interface NavItem {
   id: Page;
@@ -30,6 +31,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'tenants', label: 'Tenants', icon: Users, roles: ['owner', 'manager'] },
   { id: 'payments', label: 'Payments', icon: Receipt, roles: ['owner', 'manager'] },
   { id: 'due-dates', label: 'Due Dates', icon: CalendarClock, roles: ['owner', 'manager'] },
+  { id: 'create-account', label: 'Create Account', icon: UserPlus, roles: ['owner', 'manager'] },
   { id: 'tenant-home', label: 'My Account', icon: LayoutDashboard, roles: ['tenant'] },
 ];
 
