@@ -1,0 +1,122 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+  html.dark {
+    color-scheme: dark;
+  }
+  * {
+    border-radius: 0 !important;
+  }
+  body {
+    @apply bg-gray-50 text-gray-900 antialiased;
+    font-feature-settings: 'cv11', 'ss01';
+  }
+  html.dark body {
+    @apply bg-gray-950 text-gray-100;
+  }
+}
+
+@layer components {
+  .surface {
+    @apply bg-white border border-gray-200 dark:bg-gray-900 dark:border-gray-800;
+  }
+  .surface-muted {
+    @apply bg-gray-50 border border-gray-200 dark:bg-gray-900/60 dark:border-gray-800;
+  }
+  .input-base {
+    @apply bg-white border border-gray-300 text-gray-900 placeholder-gray-400
+      focus:border-brand-600 focus:outline-none focus:ring-1 focus:ring-brand-600
+      dark:bg-gray-900 dark:border-gray-700 dark:text-gray-100 dark:placeholder-gray-500
+      dark:focus:border-brand-500 dark:focus:ring-brand-500 transition-colors;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 font-medium text-sm px-4 py-2
+      border border-transparent transition-colors select-none disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-primary {
+    @apply bg-brand-600 text-white hover:bg-brand-700 active:bg-brand-800
+      dark:bg-brand-600 dark:hover:bg-brand-500;
+  }
+  .btn-secondary {
+    @apply bg-white text-gray-700 border-gray-300 hover:bg-gray-50
+      dark:bg-gray-800 dark:text-gray-200 dark:border-gray-700 dark:hover:bg-gray-700;
+  }
+  .btn-ghost {
+    @apply text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800;
+  }
+  .sidebar-link {
+    @apply flex items-center gap-3 px-3 py-2 text-sm font-medium text-gray-600
+      hover:bg-gray-100 hover:text-gray-900 transition-colors
+      dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100;
+  }
+  .sidebar-link-active {
+    @apply bg-brand-50 text-brand-700 hover:bg-brand-50 hover:text-brand-700
+      dark:bg-brand-950 dark:text-brand-300 dark:hover:bg-brand-950 dark:hover:text-brand-300;
+  }
+}
+
+/* Print styles */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  body.printing-receipt .printable-receipt,
+  body.printing-receipt .printable-receipt * {
+    visibility: visible;
+  }
+  body.printing-receipt .printable-receipt {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    padding: 40px;
+    max-width: 600px;
+  }
+  body.printing-receipt {
+    background: white !important;
+  }
+  .receipt-body {
+    color: #111 !important;
+  }
+  .receipt-body .bg-brand-600 {
+    background-color: #2563eb !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  @page {
+    margin: 1.5cm;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+html.dark ::-webkit-scrollbar-thumb {
+  background: #374151;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
+  background-clip: content-box;
+}
+html.dark ::-webkit-scrollbar-thumb:hover {
+  background: #4b5563;
+  background-clip: content-box;
+}
