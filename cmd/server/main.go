@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"os"
 	"os/signal"
 	"syscall"
@@ -17,11 +16,7 @@ import (
 func main() {
 	cfg := config.LoadConfig()
 	logger := common.CreateLogger()
-	connPool, err := db.CreateConnectionPool(context.Background(), cfg.DB.GetConnectionString())
-	if err != nil {
-		logger.Error("failed to create db connection pool", "err", err.Error())
-		panic(err)
-	}
+	connPool := db.Connect(&cfg.DB)
 	cacheClient := cache.CreateClient(&cfg.Redis)
 
 	// repositories
@@ -35,6 +30,6 @@ func main() {
 	<-exitChan
 	logger.Debug("interrupt signal received. shutting down system")
 	cacheClient.Client().Close()
-	connPool.Close()
+	db.CloseDB()
 	os.Exit(0)
 }

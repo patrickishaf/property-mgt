@@ -9,3 +9,7 @@ const (
 	ProcessingStatusProcessing ProcessingStatus = "processing"
 	ProcessingStatusSuccessful ProcessingStatus = "successful"
 )
+
+func (this ProcessingStatus) String() string {
+	return string(this)
+}

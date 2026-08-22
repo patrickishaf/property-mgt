@@ -4,12 +4,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 type Lease struct {
-	ID                   uuid.UUID
+	gorm.Model
 	Balance              float64
-	CreatedAt            time.Time
 	DaysUntilDue         float64
 	MonthlyRent          float64
 	NextDueDate          time.Time
@@ -17,5 +17,5 @@ type Lease struct {
 	Status               string
 	TenantID             uuid.UUID
 	TotalPaidInThisCycle float64
-	unitID               uuid.UUID
+	UnitID               uuid.UUID
 }

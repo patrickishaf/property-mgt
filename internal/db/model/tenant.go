@@ -1,15 +1,13 @@
 package model
 
 import (
-	"time"
-
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 type Tenant struct {
-	ID            uuid.UUID
+	gorm.Model
 	AnnualRent    float64
-	CreatedAt     time.Time
 	DueDayOfMonth int
 	Email         string
 	LeaseStart    string

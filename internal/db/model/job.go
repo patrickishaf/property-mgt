@@ -3,13 +3,11 @@ package model
 import (
 	"time"
 
-	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 type Job struct {
-	ID              uuid.UUID  `json:"id"`
-	CreatedAt       time.Time  `json:"created_at"`
-	UpdatedAt       time.Time  `json:"updated_at"`
+	gorm.Model
 	AttemptCount    int        `json:"attempt_count"`
 	DueDate         *time.Time `json:"due_date"`
 	Error           *string    `json:"error"`

@@ -3,13 +3,12 @@ package model
 import (
 	"time"
 
-	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 type Payment struct {
-	id         uuid.UUID
+	gorm.Model
 	Amount     float64
-	CreatedAt  time.Time
 	Date       time.Time
 	Method     string
 	RecordedBy string

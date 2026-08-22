@@ -1,16 +1,12 @@
 package model
 
 import (
-	"time"
-
-	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 type Account struct {
-	ID        uuid.UUID
-	CreatedAt time.Time
+	gorm.Model
 	Email     string
-	UpdatedAt time.Time
 	Name      string
 	Password  string
 	Phone     string

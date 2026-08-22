@@ -1,26 +1,21 @@
 package model
 
 import (
-	"time"
-
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 type Property struct {
-	ID        uuid.UUID
-	Address   any
-	CreatedAt time.Time
+	gorm.Model
+	Address   string
 	ManagerID string
 	Name      string
 	Type      string
-	UpdatedAt time.Time
 }
 
 type PropertyUnit struct {
-	id         uuid.UUID
-	CreatedAt  time.Time
+	gorm.Model
 	Floor      int
 	Label      string
 	PropertyID uuid.UUID
-	UpdatedAt  time.Time
 }
