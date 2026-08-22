@@ -21,10 +21,10 @@ func CreateServer(cfg *config.AppConfig) *Server {
 	}
 }
 
-func (this *Server) ConfigureRoutes(pathPrefix string, routers *[]common.AppRouter) {
-	for _, router := range *routers {
-		group := this.handler.Group(fmt.Sprintf("%s%s", pathPrefix, (router).GetPath()))
-		(router).RegisterRoutes(group)
+func (this *Server) ConfigureRoutes(pathPrefix string, routers []common.AppRouter) {
+	for _, router := range routers {
+		group := this.handler.Group(fmt.Sprintf("%s%s", pathPrefix, router.GetPath()))
+		router.RegisterRoutes(group)
 	}
 }
 

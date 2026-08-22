@@ -13,7 +13,7 @@ import (
 var db *gorm.DB
 
 func Connect(cfg *config.DBConfig) *gorm.DB {
-	pg, err := gorm.Open(postgres.Open(cfg.GetDSN()), &gorm.Config{})
+	pg, err := gorm.Open(postgres.Open(cfg.GetDSN()), &gorm.Config{SkipDefaultTransaction: true})
 	if err != nil {
 		panic(err)
 	}

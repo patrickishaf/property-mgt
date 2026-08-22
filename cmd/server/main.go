@@ -11,6 +11,7 @@ import (
 	"github.com/patrickishaf/property-mgt/internal/db"
 	"github.com/patrickishaf/property-mgt/internal/db/repository"
 	"github.com/patrickishaf/property-mgt/internal/net"
+	"github.com/patrickishaf/property-mgt/pkg/auth"
 )
 
 func main() {
@@ -21,8 +22,19 @@ func main() {
 
 	// repositories
 	repository.CreateJobRepository(&cfg.App, connPool, logger)
+
+	// services
+	authService := auth.CreateService()
+
+	// http handlers
+	authHTTPHandler := auth.CreateHTTPHandler(authService)
+
+	// routers
+	authRouter := auth.CreateRouter(authHTTPHandler, "/auth")
+
 	srv := net.CreateServer(&cfg.App)
 	srv.ConfigureMidleware([]net.Middleware{})
+	srv.ConfigureRoutes("", []common.AppRouter{authRouter})
 	go srv.Run()
 
 	exitChan := make(chan os.Signal, 1)
