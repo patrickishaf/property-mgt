@@ -1,6 +1,7 @@
 package net
 
 import (
+	"strings"
 	"sync"
 
 	"github.com/gin-gonic/gin"
@@ -79,5 +80,25 @@ func RateLimitByUsername(requestsPerMinute, burstRequestLimit int) gin.HandlerFu
 			c.Abort()
 			return
 		}
+	}
+}
+
+func VerifyJWT(jwtKey string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		authHeader := c.GetHeader("Authorization")
+		if authHeader == "" {
+			c.IndentedJSON(401, ErrorResponse(common.ErrRequestRateLimited, nil))
+			c.Abort()
+			return
+		}
+		token := strings.Split(authHeader, " ")[1]
+		actor, err := common.ExtractActorFromJWT(token, jwtKey)
+		if err != nil {
+			c.IndentedJSON(401, ErrorResponse(common.ErrRequestRateLimited, nil))
+			c.Abort()
+			return
+		}
+		c.Set(common.CTX_KEY_ACTOR, actor)
+		c.Next()
 	}
 }

@@ -12,6 +12,24 @@ func CreateHTTPHandler(srv *service) *httpHandler {
 	}
 }
 
+func (this *httpHandler) createOwnerAccount(c *gin.Context) {
+	res := this.srv.createOwnerAccount(c.Request.Context())
+	if res.Err != nil {
+		c.IndentedJSON(res.StatusCode, res.Err.Error())
+	} else {
+		c.IndentedJSON(res.StatusCode, res.Data)
+	}
+}
+
+func (this *httpHandler) getAuthenticatedUser(c *gin.Context) {
+	res := this.srv.getAuthenticatedUser(c.Request.Context())
+	if res.Err != nil {
+		c.IndentedJSON(res.StatusCode, res.Err.Error())
+	} else {
+		c.IndentedJSON(res.StatusCode, res.Data)
+	}
+}
+
 func (this *httpHandler) loginWithPassword(c *gin.Context) {
 	res := this.srv.loginWithPassword(c.Request.Context())
 	if res.Err != nil {

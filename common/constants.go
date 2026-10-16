@@ -1,6 +1,7 @@
 package common
 
 const (
+	CTX_KEY_ACTOR          = "request_actor"
 	REQUEST_ID_HEADER      = "X-Request-Id"
 	REQUEST_ID_KEY         = "request_id"
 	REQUEST_USER_EMAIL_KEY = "request_user_email"

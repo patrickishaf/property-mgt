@@ -19,6 +19,8 @@ func (this *router) GetPath() string {
 }
 
 func (this *router) RegisterRoutes(router *gin.RouterGroup) {
+	router.POST("/accounts", this.http.createOwnerAccount)
+	router.GET("/user", this.http.getAuthenticatedUser)
 	router.POST("/login", this.http.loginWithPassword)
 	router.POST("/logout", this.http.logout)
 	router.POST("/otp", this.http.sendOTP)
