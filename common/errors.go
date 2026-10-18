@@ -8,6 +8,7 @@ const (
 	ErrGeneric              string = "something went wrong"
 	ErrInvalidCredentials   string = "invalid credentials"
 	ErrInvalidRequest       string = "invalid request"
+	ErrInvalidToken         string = "invalid token"
 	ErrTokenExpired         string = "access token expired"
 	ErrMethodNotImplemented string = "method not implemented"
 	ErrNoRowsInResultSet    string = "no rows in result set"

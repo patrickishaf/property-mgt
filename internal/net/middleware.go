@@ -87,14 +87,19 @@ func VerifyJWT(jwtKey string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
-			c.IndentedJSON(401, ErrorResponse(common.ErrRequestRateLimited, nil))
+			c.IndentedJSON(401, ErrorResponse(common.ErrInvalidRequest, nil))
 			c.Abort()
 			return
 		}
-		token := strings.Split(authHeader, " ")[1]
-		actor, err := common.ExtractActorFromJWT(token, jwtKey)
+		tokens := strings.Split(authHeader, " ")
+		if len(tokens) != 2 || tokens[0] != "Bearer" {
+			c.IndentedJSON(401, ErrorResponse(common.ErrInvalidRequest, nil))
+			c.Abort()
+			return
+		}
+		actor, err := common.ExtractActorFromJWT(tokens[2], jwtKey)
 		if err != nil {
-			c.IndentedJSON(401, ErrorResponse(common.ErrRequestRateLimited, nil))
+			c.IndentedJSON(401, ErrorResponse(common.ErrInvalidToken, nil))
 			c.Abort()
 			return
 		}

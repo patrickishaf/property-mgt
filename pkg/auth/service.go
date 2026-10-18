@@ -13,7 +13,7 @@ func CreateService() *service {
 	return &service{}
 }
 
-func (this *service) createOwnerAccount(ctx context.Context) common.ServiceResponse {
+func (this *service) createOwnerAccount(ctx context.Context, dto createOwnerAccountReq) common.ServiceResponse {
 	return common.ServiceResponse{StatusCode: 200, Err: errors.New(common.ErrMethodNotImplemented)}
 }
 

@@ -10,6 +10,8 @@ import (
 
 type Config struct {
 	App   AppConfig
+	Bachs BachsConfig
+	Cpaas CpaasConfig
 	DB    DBConfig
 	Redis RedisConfig
 }

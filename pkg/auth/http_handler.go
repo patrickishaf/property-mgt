@@ -1,6 +1,9 @@
 package auth
 
-import "github.com/gin-gonic/gin"
+import (
+	"github.com/gin-gonic/gin"
+	"github.com/patrickishaf/property-mgt/common"
+)
 
 type httpHandler struct {
 	srv *service
@@ -13,7 +16,13 @@ func CreateHTTPHandler(srv *service) *httpHandler {
 }
 
 func (this *httpHandler) createOwnerAccount(c *gin.Context) {
-	res := this.srv.createOwnerAccount(c.Request.Context())
+	var body createOwnerAccountReq
+	if err := c.ShouldBindJSON(body); err != nil {
+		c.IndentedJSON(400, common.ErrInvalidRequest)
+		return
+	}
+
+	res := this.srv.createOwnerAccount(c.Request.Context(), body)
 	if res.Err != nil {
 		c.IndentedJSON(res.StatusCode, res.Err.Error())
 	} else {

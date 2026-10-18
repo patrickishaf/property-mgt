@@ -11,4 +11,5 @@ type AppConfig struct {
 	Port                         int    `envconfig:"PORT"`
 	RefreshTokenExpirationHours  int    `envconfig:"JWT_RT_EXPIRATION_HOURS"`
 	WebAppURL                    string `envconfig:"WEB_APP_URL"`
+	WorkerPoolCapacity           int    `envconfig:"WORKER_POOL_CAPACITY" default:"100"`
 }
