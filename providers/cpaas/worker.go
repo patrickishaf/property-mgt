@@ -1,7 +1,6 @@
 package cpaas
 
 import (
-	"fmt"
 	"sync"
 
 	"github.com/patrickishaf/property-mgt/common"
@@ -9,11 +8,11 @@ import (
 
 type worker struct {
 	client      *client
-	cronManager *common.CronExecutor
+	cronManager *common.Scheduler
 	mu          *sync.Mutex
 }
 
-func NewWorker(client *client, cronManager *common.CronExecutor) *worker {
+func NewWorker(client *client, cronManager *common.Scheduler) *worker {
 	var mu *sync.Mutex
 	w := worker{
 		client:      client,
@@ -25,7 +24,6 @@ func NewWorker(client *client, cronManager *common.CronExecutor) *worker {
 }
 
 func (this *worker) runJob() {
-	fmt.Println("running cpaas worker")
 	/*
 		fetch pending email jobs
 		attempt to send email

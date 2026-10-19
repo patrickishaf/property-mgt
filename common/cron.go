@@ -6,24 +6,24 @@ import (
 	"github.com/robfig/cron/v3"
 )
 
-type CronExecutor struct {
+type Scheduler struct {
 	c *cron.Cron
 }
 
-func CreateCronExecutor() *CronExecutor {
-	return &CronExecutor{
+func CreateScheduler() *Scheduler {
+	return &Scheduler{
 		c: cron.New(),
 	}
 }
 
-func (c *CronExecutor) Cron() *cron.Cron {
+func (c *Scheduler) Cron() *cron.Cron {
 	return c.c
 }
 
-func (c *CronExecutor) Start() {
+func (c *Scheduler) Start() {
 	c.c.Start()
 }
 
-func (c *CronExecutor) Stop() context.Context {
+func (c *Scheduler) Stop() context.Context {
 	return c.c.Stop()
 }

@@ -4,7 +4,7 @@ import "github.com/patrickishaf/property-mgt/common"
 
 type service struct{}
 
-func NewService() *service {
+func CreateService() *service {
 	return &service{}
 }
 

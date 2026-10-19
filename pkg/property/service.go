@@ -1,41 +1,45 @@
 package property
 
-import "github.com/patrickishaf/property-mgt/common"
+import (
+	"context"
+
+	"github.com/patrickishaf/property-mgt/common"
+)
 
 type service struct{}
 
-func NewService() *service {
+func CreateService() *service {
 	return &service{}
 }
 
-func (this *service) createPropertyManager() common.ServiceResponse {
+func (this *service) createPropertyManager(ctx context.Context) common.ServiceResponse {
 	return common.ServiceResponse{}
 }
 
-func (this *service) getProperties() common.ServiceResponse {
+func (this *service) getProperties(ctx context.Context) common.ServiceResponse {
 	return common.ServiceResponse{}
 }
 
-func (this *service) getPropertyInfo() common.ServiceResponse {
+func (this *service) getPropertyInfo(ctx context.Context) common.ServiceResponse {
 	return common.ServiceResponse{}
 }
 
-func (this *service) getPropertyManager() common.ServiceResponse {
+func (this *service) getPropertyManager(ctx context.Context) common.ServiceResponse {
 	return common.ServiceResponse{}
 }
 
-func (this *service) getPropertyManagers() common.ServiceResponse {
+func (this *service) getPropertyManagers(ctx context.Context) common.ServiceResponse {
 	return common.ServiceResponse{}
 }
 
-func (this *service) removePropertyManager() common.ServiceResponse {
+func (this *service) removePropertyManager(ctx context.Context) common.ServiceResponse {
 	return common.ServiceResponse{}
 }
 
-func (this *service) updatePropertyInfo() common.ServiceResponse {
+func (this *service) updatePropertyInfo(ctx context.Context) common.ServiceResponse {
 	return common.ServiceResponse{}
 }
 
-func (this *service) updatePropertyManager() common.ServiceResponse {
+func (this *service) updatePropertyManager(ctx context.Context) common.ServiceResponse {
 	return common.ServiceResponse{}
 }
