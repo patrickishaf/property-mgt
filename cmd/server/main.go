@@ -12,6 +12,7 @@ import (
 	"github.com/patrickishaf/property-mgt/internal/db/repository"
 	"github.com/patrickishaf/property-mgt/internal/net"
 	"github.com/patrickishaf/property-mgt/pkg/auth"
+	"github.com/patrickishaf/property-mgt/providers/cpaas"
 )
 
 func main() {
@@ -19,6 +20,10 @@ func main() {
 	logger := common.CreateLogger()
 	connPool := db.Connect(&cfg.DB)
 	cacheClient := cache.CreateClient(&cfg.Redis)
+	cronExec := common.CreateCronExecutor()
+
+	cpaasClient := cpaas.NewClient(&cfg.Cpaas)
+	cpaas.NewWorker(cpaasClient, cronExec)
 
 	// repositories
 	repository.CreateJobRepository(&cfg.App, connPool, logger)
@@ -36,11 +41,13 @@ func main() {
 	srv.ConfigureMidleware([]net.Middleware{})
 	srv.ConfigureRoutes("", []common.AppRouter{authRouter})
 	go srv.Run()
+	cronExec.Start()
 
 	exitChan := make(chan os.Signal, 1)
 	signal.Notify(exitChan, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
 	<-exitChan
 	logger.Debug("interrupt signal received. shutting down system")
+	cronExec.Stop()
 	cacheClient.Client().Close()
 	db.CloseDB()
 	os.Exit(0)

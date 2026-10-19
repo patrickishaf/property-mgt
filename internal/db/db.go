@@ -21,12 +21,18 @@ func Connect(cfg *config.DBConfig) *gorm.DB {
 
 	db = pg
 	err = db.AutoMigrate(
-		&model.Account{},
+		&model.Complaint{},
+		&model.ComplaintUpdate{},
+		&model.Installment{},
+		&model.Issue{},
 		&model.Job{},
 		&model.Lease{},
+		&model.Message{},
 		&model.Payment{},
 		&model.Property{},
+		&model.PropertyManager{},
 		&model.PropertyUnit{},
+		&model.Receipt{},
 		&model.Tenant{},
 	)
 	if err != nil {

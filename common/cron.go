@@ -1,6 +1,10 @@
 package common
 
-import "github.com/robfig/cron/v3"
+import (
+	"context"
+
+	"github.com/robfig/cron/v3"
+)
 
 type CronExecutor struct {
 	c *cron.Cron
@@ -18,4 +22,8 @@ func (c *CronExecutor) Cron() *cron.Cron {
 
 func (c *CronExecutor) Start() {
 	c.c.Start()
+}
+
+func (c *CronExecutor) Stop() context.Context {
+	return c.c.Stop()
 }

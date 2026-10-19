@@ -1,37 +1,34 @@
 package cpaas
 
 import (
-	"github.com/patrickishaf/property-mgt/common"
 	"github.com/patrickishaf/property-mgt/config"
 	"github.com/patrickishaf/property-mgt/internal/net"
 )
 
-type Client struct {
-	cfg  *config.Config
-	exec *common.CronExecutor
+type client struct {
+	cfg  *config.CpaasConfig
 	http *net.HTTPClient
 }
 
-func NewClient(cfg *config.Config, exec *common.CronExecutor) *Client {
+func NewClient(cfg *config.CpaasConfig) *client {
 	headers := make(map[string]string)
-	headers["Authorization"] = cfg.Cpaas.APIKey
+	headers["Authorization"] = cfg.APIKey
 	headers["Accept"] = "application/json"
 	headers["Content-Type"] = "application/json"
 
-	return &Client{
+	return &client{
 		cfg:  cfg,
-		exec: exec,
-		http: net.NewHTTPClient(cfg.Cpaas.APIBaseURL, headers),
+		http: net.NewHTTPClient(cfg.APIBaseURL, headers),
 	}
 }
 
-func (this *Client) sendEmail(emailType EmailType, recipient EmailRecipient, payload map[string]string) error {
+func (this *client) sendEmail(emailType EmailType, recipient EmailRecipient, payload map[string]string) error {
 	data := map[string]any{
 		"template_key": this.templateForEmailType(emailType),
 		"merge_info":   payload,
 		"from": map[string]string{
-			"address": this.cfg.Cpaas.SenderAddress,
-			"name":    this.cfg.App.AppName,
+			"address": this.cfg.SenderAddress,
+			"name":    this.cfg.SenderName,
 		},
 		"to": []emailReceiver{
 			{
@@ -50,9 +47,9 @@ func (this *Client) sendEmail(emailType EmailType, recipient EmailRecipient, pay
 	return nil
 }
 
-func (this *Client) sendSMS() {}
+func (this *client) sendSMS() {}
 
-func (this *Client) templateForEmailType(emailType EmailType) string {
+func (this *client) templateForEmailType(emailType EmailType) string {
 	switch emailType {
 	case EmailTypeGeneralNotice:
 		return "general_notice"
