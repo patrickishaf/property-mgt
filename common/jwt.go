@@ -13,7 +13,7 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
-func ExtractActorFromJWT(token, jwtKey string) (*Actor, error) {
+func ExtractActorFromJWT(token string, jwtKey []byte) (*Actor, error) {
 	claims := &Claims{}
 	tkn, err := jwt.ParseWithClaims(token, claims, func(token *jwt.Token) (interface{}, error) {
 		return jwtKey, nil

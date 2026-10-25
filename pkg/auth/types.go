@@ -17,3 +17,9 @@ type jwtPayload struct {
 	Actor common.Actor
 	jwt.RegisteredClaims
 }
+
+type passwordLoginReq struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+	Type     string `json:"accountType"`
+}

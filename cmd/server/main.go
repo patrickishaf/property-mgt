@@ -35,9 +35,10 @@ func main() {
 	// repositories
 	adminRepo := repository.CreateAdminRepository(dbConn, logger)
 	repository.CreateJobRepository(&cfg.App, dbConn, logger)
+	tenantRepo := repository.CreateTenantRepository(dbConn, logger)
 
 	// services
-	authService := auth.CreateService(&cfg.App, logger, adminRepo)
+	authService := auth.CreateService(&cfg.App, logger, adminRepo, tenantRepo)
 	maintenanceService := maintenance.CreateService()
 	messagingService := messaging.CreateService()
 	paymentService := payment.CreateService()
@@ -55,7 +56,7 @@ func main() {
 	tenantHTTPHandler := tenant.CreateHTTPHandler(tenantService)
 
 	// routers
-	authRouter := auth.CreateRouter(authHTTPHandler, "/auth")
+	authRouter := auth.CreateRouter(&cfg.App, authHTTPHandler, "/auth")
 	maintenanceRouter := maintenance.CreateRouter(maintenanceHTTPHandler, "/maintenance")
 	messagingRouter := messaging.CreateRouter(messagingHTTPHandler, "/messages")
 	paymentRouter := payment.CreateRouter(paymentHTTPHandler, "/payments")
@@ -64,7 +65,9 @@ func main() {
 	tenantRouter := tenant.CreateRouter(tenantHTTPHandler, "/tenants")
 
 	srv := net.CreateServer(&cfg.App)
-	srv.ConfigureMidleware([]net.Middleware{})
+	srv.ConfigureMidleware([]net.Middleware{
+		net.AttachRequestID,
+	})
 	srv.ConfigureRoutes("", []common.AppRouter{
 		authRouter,
 		maintenanceRouter,

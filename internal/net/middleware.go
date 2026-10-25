@@ -97,7 +97,7 @@ func VerifyJWT(jwtKey string) gin.HandlerFunc {
 			c.Abort()
 			return
 		}
-		actor, err := common.ExtractActorFromJWT(tokens[2], jwtKey)
+		actor, err := common.ExtractActorFromJWT(tokens[1], []byte(jwtKey))
 		if err != nil {
 			c.IndentedJSON(401, ErrorResponse(common.ErrInvalidToken, nil))
 			c.Abort()

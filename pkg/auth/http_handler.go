@@ -34,7 +34,19 @@ func (this *httpHandler) createOwnerAccount(c *gin.Context) {
 }
 
 func (this *httpHandler) getAuthenticatedUser(c *gin.Context) {
-	res := this.srv.getAuthenticatedUser(c.Request.Context())
+	value, exists := c.Get(common.CTX_KEY_ACTOR)
+	if !exists {
+		log.Println("no actor in context")
+		c.IndentedJSON(400, common.ErrInvalidCredentials)
+		return
+	}
+	actor, isValid := value.(*common.Actor)
+	if !isValid {
+		log.Println("invalid actor in context")
+		c.IndentedJSON(400, common.ErrInvalidCredentials)
+		return
+	}
+	res := this.srv.getAuthenticatedUser(c.Request.Context(), actor)
 	if res.Err != nil {
 		c.IndentedJSON(res.StatusCode, res.Err.Error())
 	} else {
@@ -43,7 +55,7 @@ func (this *httpHandler) getAuthenticatedUser(c *gin.Context) {
 }
 
 func (this *httpHandler) loginWithPassword(c *gin.Context) {
-	res := this.srv.loginWithPassword(c.Request.Context())
+	res := this.srv.loginWithPassword(passwordLoginReq{})
 	if res.Err != nil {
 		c.IndentedJSON(res.StatusCode, res.Err.Error())
 	} else {

@@ -2,6 +2,8 @@ package common
 
 import "github.com/gin-gonic/gin"
 
+const ActorRoleTenant = "tenant"
+
 type Actor struct {
 	ID          uint   `json:"id"`
 	Email       string `json:"email"`

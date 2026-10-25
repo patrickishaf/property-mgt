@@ -2,7 +2,6 @@ package repository
 
 import (
 	"log/slog"
-	"reflect"
 	"sync"
 
 	"github.com/patrickishaf/property-mgt/common"
@@ -23,14 +22,26 @@ func CreateAdminRepository(db *gorm.DB, logger *slog.Logger) *AdminRepository {
 	}
 }
 
-func (this *AdminRepository) FindOneByEmail(email string, role common.AdminRole) (*model.Admin, error) {
+func (this *AdminRepository) FindOneById(id uint) (*model.Admin, error) {
 	var a model.Admin
-	err := this.db.Where(&model.Admin{Email: email, Role: role.ToString()}).Find(&a).Error
+	err := this.db.Where("id = ?", id).First(&a).Error
 	if err != nil {
+		if err.Error() == "record not found" {
+			return nil, nil
+		}
 		return nil, err
 	}
-	if reflect.DeepEqual(a, model.Admin{}) {
-		return nil, nil
+	return &a, nil
+}
+
+func (this *AdminRepository) FindOneByEmail(email string, role common.AdminRole) (*model.Admin, error) {
+	var a model.Admin
+	err := this.db.Where(&model.Admin{Email: email, Role: role.ToString()}).First(&a).Error
+	if err != nil {
+		if err.Error() == "record not found" {
+			return nil, nil
+		}
+		return nil, err
 	}
 	return &a, nil
 }

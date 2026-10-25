@@ -15,16 +15,18 @@ import (
 )
 
 type service struct {
-	adminRepo *repository.AdminRepository
-	cfg       *config.AppConfig
-	logger    *slog.Logger
+	adminRepo  *repository.AdminRepository
+	cfg        *config.AppConfig
+	logger     *slog.Logger
+	tenantRepo *repository.TenantRepository
 }
 
-func CreateService(cfg *config.AppConfig, logger *slog.Logger, adminRepo *repository.AdminRepository) *service {
+func CreateService(cfg *config.AppConfig, logger *slog.Logger, adminRepo *repository.AdminRepository, tenantRepo *repository.TenantRepository) *service {
 	return &service{
-		adminRepo: adminRepo,
-		cfg:       cfg,
-		logger:    logger,
+		adminRepo:  adminRepo,
+		cfg:        cfg,
+		logger:     logger,
+		tenantRepo: tenantRepo,
 	}
 }
 
@@ -62,9 +64,6 @@ func (this *service) createOwnerAccount(ctx context.Context, dto createOwnerAcco
 		return common.ServiceResponse{StatusCode: 500, Err: errors.New(common.ErrGeneric)}
 	}
 
-	/*
-		sign in this user and get the
-	*/
 	admin, err = this.adminRepo.FindOneByEmail(dto.Email, common.AdminRoleOwner)
 	actor := common.Actor{
 		ID:          admin.ID,
@@ -74,7 +73,7 @@ func (this *service) createOwnerAccount(ctx context.Context, dto createOwnerAcco
 		PhoneNumber: admin.PhoneNumber,
 		Role:        admin.Role,
 	}
-	accessToken, err := this.generateAccessToken(actor)
+	accessToken, err := common.GenerateJWT(*this.cfg, actor)
 	if err != nil {
 		logger.Error("failed to generate access token", "err", err.Error())
 		return common.ServiceResponse{StatusCode: 500, Err: errors.New(common.ErrGeneric)}
@@ -85,12 +84,7 @@ func (this *service) createOwnerAccount(ctx context.Context, dto createOwnerAcco
 		return common.ServiceResponse{StatusCode: 500, Err: errors.New(common.ErrGeneric)}
 	}
 	return common.ServiceResponse{StatusCode: 200, Data: map[string]any{
-		"user": map[string]string{
-			"email":       actor.Email,
-			"firstName":   actor.FirstName,
-			"lastName":    actor.LastName,
-			"phoneNumber": actor.PhoneNumber,
-		},
+		"user":         admin.Safe(),
 		"accessToken":  accessToken,
 		"refreshToken": refreshToken,
 	}}
@@ -120,11 +114,38 @@ func (this *service) generateRefreshToken(actor common.Actor) (string, error) {
 	return token.SignedString([]byte(this.cfg.JWTSecretKey))
 }
 
-func (this *service) getAuthenticatedUser(ctx context.Context) common.ServiceResponse {
+func (this *service) getAuthenticatedUser(ctx context.Context, actor *common.Actor) common.ServiceResponse {
+	logger := this.logger.With("service", "auth.service", "caller", "auth.service.getAuthenticatedUser", "actor", actor.Email)
+
+	if actor == nil {
+		return common.ServiceResponse{StatusCode: 401, Err: errors.New(common.ErrInvalidCredentials)}
+	}
+
+	if actor.Role == common.AdminRoleOwner.ToString() || actor.Role == common.AdminRoleManager.ToString() {
+		admin, err := this.adminRepo.FindOneById(actor.ID)
+		if err != nil {
+			logger.Error("failed to find admin by id", "err", err.Error())
+			return common.ServiceResponse{StatusCode: 500, Err: errors.New(common.ErrGeneric)}
+		}
+		if admin == nil {
+			return common.ServiceResponse{StatusCode: 404, Err: errors.New(common.ErrDBRecordNotFound)}
+		}
+		return common.ServiceResponse{StatusCode: 200, Data: admin.Safe()}
+	} else if actor.Role == common.ActorRoleTenant {
+		tenant, err := this.tenantRepo.FindOneById(actor.ID)
+		if err != nil {
+			logger.Error("failed to find tenant by id", "err", err.Error())
+			return common.ServiceResponse{StatusCode: 500, Err: errors.New(common.ErrGeneric)}
+		}
+		if tenant == nil {
+			return common.ServiceResponse{StatusCode: 404, Err: errors.New(common.ErrDBRecordNotFound)}
+		}
+		return common.ServiceResponse{StatusCode: 200, Data: tenant.SafeMap()}
+	}
 	return common.ServiceResponse{StatusCode: 200, Err: errors.New(common.ErrMethodNotImplemented)}
 }
 
-func (this *service) loginWithPassword(ctx context.Context) common.ServiceResponse {
+func (this *service) loginWithPassword(dto passwordLoginReq) common.ServiceResponse {
 	return common.ServiceResponse{StatusCode: 200, Err: errors.New(common.ErrMethodNotImplemented)}
 }
 
