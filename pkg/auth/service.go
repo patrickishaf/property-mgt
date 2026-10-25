@@ -2,7 +2,6 @@ package auth
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -30,7 +29,7 @@ func CreateService(cfg *config.AppConfig, logger *slog.Logger, adminRepo *reposi
 	}
 }
 
-func (this *service) createOwnerAccount(ctx context.Context, dto createOwnerAccountReq) common.ServiceResponse {
+func (this *service) createOwnerAccount(dto createOwnerAccountReq) common.ServiceResponse {
 	logger := this.logger.With("service", "auth.service", "caller", "auth.service", "actor", dto.Email)
 	/**
 	- find an existing owner with that email
@@ -39,17 +38,17 @@ func (this *service) createOwnerAccount(ctx context.Context, dto createOwnerAcco
 	admin, err := this.adminRepo.FindOneByEmail(dto.Email, common.AdminRoleOwner)
 	if err != nil {
 		logger.Error("failed to find existing owner by email", "err", err.Error())
-		return common.ServiceResponse{StatusCode: 500, Err: errors.New(common.ErrGeneric)}
+		return common.ServiceResponse{StatusCode: 500, Err: common.ErrGeneric}
 	}
 	if admin != nil {
 		logger.Info("admin is nil", "admin", fmt.Sprintf("%+v", admin))
-		return common.ServiceResponse{StatusCode: 401, Err: errors.New("email already taken")}
+		return common.ServiceResponse{StatusCode: 401, Err: "email already taken"}
 	}
 
 	pwdHash, err := common.HashPassword(dto.Password)
 	if err != nil {
 		logger.Error("failed to hash password")
-		return common.ServiceResponse{StatusCode: 500, Err: errors.New(common.ErrGeneric)}
+		return common.ServiceResponse{StatusCode: 500, Err: common.ErrGeneric}
 	}
 	err = this.adminRepo.SaveOne(&model.Admin{
 		Email:        dto.Email,
@@ -61,7 +60,7 @@ func (this *service) createOwnerAccount(ctx context.Context, dto createOwnerAcco
 	})
 	if err != nil {
 		logger.Error("failed to save admin to repo", "err", err.Error())
-		return common.ServiceResponse{StatusCode: 500, Err: errors.New(common.ErrGeneric)}
+		return common.ServiceResponse{StatusCode: 500, Err: common.ErrGeneric}
 	}
 
 	admin, err = this.adminRepo.FindOneByEmail(dto.Email, common.AdminRoleOwner)
@@ -76,30 +75,18 @@ func (this *service) createOwnerAccount(ctx context.Context, dto createOwnerAcco
 	accessToken, err := common.GenerateJWT(*this.cfg, actor)
 	if err != nil {
 		logger.Error("failed to generate access token", "err", err.Error())
-		return common.ServiceResponse{StatusCode: 500, Err: errors.New(common.ErrGeneric)}
+		return common.ServiceResponse{StatusCode: 500, Err: common.ErrGeneric}
 	}
 	refreshToken, err := this.generateRefreshToken(actor)
 	if err != nil {
 		logger.Error("failed to generate access token", "err", err.Error())
-		return common.ServiceResponse{StatusCode: 500, Err: errors.New(common.ErrGeneric)}
+		return common.ServiceResponse{StatusCode: 500, Err: common.ErrGeneric}
 	}
 	return common.ServiceResponse{StatusCode: 200, Data: map[string]any{
 		"user":         admin.Safe(),
 		"accessToken":  accessToken,
 		"refreshToken": refreshToken,
 	}}
-}
-
-func (this *service) generateAccessToken(actor common.Actor) (string, error) {
-	expiryDate := time.Now().Add(time.Minute * time.Duration(this.cfg.AccessTokenExpirationMinutes))
-	claims := jwtPayload{
-		Actor: actor,
-		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(expiryDate),
-		},
-	}
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, &claims)
-	return token.SignedString([]byte(this.cfg.JWTSecretKey))
 }
 
 func (this *service) generateRefreshToken(actor common.Actor) (string, error) {
@@ -114,49 +101,49 @@ func (this *service) generateRefreshToken(actor common.Actor) (string, error) {
 	return token.SignedString([]byte(this.cfg.JWTSecretKey))
 }
 
-func (this *service) getAuthenticatedUser(ctx context.Context, actor *common.Actor) common.ServiceResponse {
+func (this *service) getAuthenticatedUser(actor *common.Actor) common.ServiceResponse {
 	logger := this.logger.With("service", "auth.service", "caller", "auth.service.getAuthenticatedUser", "actor", actor.Email)
 
 	if actor == nil {
-		return common.ServiceResponse{StatusCode: 401, Err: errors.New(common.ErrInvalidCredentials)}
+		return common.ServiceResponse{StatusCode: 401, Err: common.ErrInvalidCredentials}
 	}
 
 	if actor.Role == common.AdminRoleOwner.ToString() || actor.Role == common.AdminRoleManager.ToString() {
 		admin, err := this.adminRepo.FindOneById(actor.ID)
 		if err != nil {
 			logger.Error("failed to find admin by id", "err", err.Error())
-			return common.ServiceResponse{StatusCode: 500, Err: errors.New(common.ErrGeneric)}
+			return common.ServiceResponse{StatusCode: 500, Err: common.ErrGeneric}
 		}
 		if admin == nil {
-			return common.ServiceResponse{StatusCode: 404, Err: errors.New(common.ErrDBRecordNotFound)}
+			return common.ServiceResponse{StatusCode: 404, Err: common.ErrDBRecordNotFound}
 		}
 		return common.ServiceResponse{StatusCode: 200, Data: admin.Safe()}
 	} else if actor.Role == common.ActorRoleTenant {
 		tenant, err := this.tenantRepo.FindOneById(actor.ID)
 		if err != nil {
 			logger.Error("failed to find tenant by id", "err", err.Error())
-			return common.ServiceResponse{StatusCode: 500, Err: errors.New(common.ErrGeneric)}
+			return common.ServiceResponse{StatusCode: 500, Err: common.ErrGeneric}
 		}
 		if tenant == nil {
-			return common.ServiceResponse{StatusCode: 404, Err: errors.New(common.ErrDBRecordNotFound)}
+			return common.ServiceResponse{StatusCode: 404, Err: common.ErrDBRecordNotFound}
 		}
 		return common.ServiceResponse{StatusCode: 200, Data: tenant.SafeMap()}
 	}
-	return common.ServiceResponse{StatusCode: 200, Err: errors.New(common.ErrMethodNotImplemented)}
+	return common.ServiceResponse{StatusCode: 200, Err: common.ErrMethodNotImplemented}
 }
 
 func (this *service) loginWithPassword(dto passwordLoginReq) common.ServiceResponse {
-	return common.ServiceResponse{StatusCode: 200, Err: errors.New(common.ErrMethodNotImplemented)}
+	return common.ServiceResponse{StatusCode: 200, Err: common.ErrMethodNotImplemented}
 }
 
 func (this *service) refreshAuthToken(ctx context.Context) common.ServiceResponse {
-	return common.ServiceResponse{StatusCode: 200, Err: errors.New(common.ErrMethodNotImplemented)}
+	return common.ServiceResponse{StatusCode: 200, Err: common.ErrMethodNotImplemented}
 }
 
 func (this *service) validateAccessToken(ctx context.Context) common.ServiceResponse {
-	return common.ServiceResponse{StatusCode: 200, Err: errors.New(common.ErrMethodNotImplemented)}
+	return common.ServiceResponse{StatusCode: 200, Err: common.ErrMethodNotImplemented}
 }
 
 func (this *service) verifyOTP(ctx context.Context) common.ServiceResponse {
-	return common.ServiceResponse{StatusCode: 200, Err: errors.New(common.ErrMethodNotImplemented)}
+	return common.ServiceResponse{StatusCode: 200, Err: common.ErrMethodNotImplemented}
 }

@@ -35,6 +35,6 @@ type AppRouter interface {
 
 type ServiceResponse struct {
 	Data       any
-	Err        error
+	Err        string
 	StatusCode int
 }

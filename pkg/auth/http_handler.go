@@ -20,14 +20,14 @@ func CreateHTTPHandler(srv *service) *httpHandler {
 func (this *httpHandler) createOwnerAccount(c *gin.Context) {
 	var body createOwnerAccountReq
 	if err := c.ShouldBindJSON(&body); err != nil {
-		log.Println("failed to bind hjson", "err", err.Error())
+		log.Println("failed to bind json", "err", err.Error())
 		c.IndentedJSON(400, common.ErrInvalidRequest)
 		return
 	}
 
-	res := this.srv.createOwnerAccount(c.Request.Context(), body)
-	if res.Err != nil {
-		c.IndentedJSON(res.StatusCode, res.Err.Error())
+	res := this.srv.createOwnerAccount(body)
+	if res.Err != "" {
+		c.IndentedJSON(res.StatusCode, res.Err)
 	} else {
 		c.IndentedJSON(res.StatusCode, res.Data)
 	}
@@ -46,9 +46,9 @@ func (this *httpHandler) getAuthenticatedUser(c *gin.Context) {
 		c.IndentedJSON(400, common.ErrInvalidCredentials)
 		return
 	}
-	res := this.srv.getAuthenticatedUser(c.Request.Context(), actor)
-	if res.Err != nil {
-		c.IndentedJSON(res.StatusCode, res.Err.Error())
+	res := this.srv.getAuthenticatedUser(actor)
+	if res.Err != "" {
+		c.IndentedJSON(res.StatusCode, res.Err)
 	} else {
 		c.IndentedJSON(res.StatusCode, res.Data)
 	}
@@ -56,8 +56,8 @@ func (this *httpHandler) getAuthenticatedUser(c *gin.Context) {
 
 func (this *httpHandler) loginWithPassword(c *gin.Context) {
 	res := this.srv.loginWithPassword(passwordLoginReq{})
-	if res.Err != nil {
-		c.IndentedJSON(res.StatusCode, res.Err.Error())
+	if res.Err != "" {
+		c.IndentedJSON(res.StatusCode, res.Err)
 	} else {
 		c.IndentedJSON(res.StatusCode, res.Data)
 	}
@@ -65,8 +65,8 @@ func (this *httpHandler) loginWithPassword(c *gin.Context) {
 
 func (this *httpHandler) verifyOTP(c *gin.Context) {
 	res := this.srv.verifyOTP(c.Request.Context())
-	if res.Err != nil {
-		c.IndentedJSON(res.StatusCode, res.Err.Error())
+	if res.Err != "" {
+		c.IndentedJSON(res.StatusCode, res.Err)
 	} else {
 		c.IndentedJSON(res.StatusCode, res.Data)
 	}
