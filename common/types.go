@@ -3,12 +3,23 @@ package common
 import "github.com/gin-gonic/gin"
 
 type Actor struct {
-	ID          uint     `json:"id"`
-	Email       string   `json:"email"`
-	FirstName   string   `json:"firstName"`
-	LastName    string   `json:"lastName"`
-	PhoneNumber string   `json:"phonenumber"`
-	Roles       []string `json:"roles"`
+	ID          uint   `json:"id"`
+	Email       string `json:"email"`
+	FirstName   string `json:"firstName"`
+	LastName    string `json:"lastName"`
+	PhoneNumber string `json:"phonenumber"`
+	Role        string `json:"role"`
+}
+
+type AdminRole string
+
+const (
+	AdminRoleOwner   AdminRole = "owner"
+	AdminRoleManager AdminRole = "property_manager"
+)
+
+func (ar AdminRole) ToString() string {
+	return string(ar)
 }
 
 type AppComponent interface {

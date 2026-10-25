@@ -24,5 +24,7 @@ func (this *DBConfig) GetConnectionString() string {
 }
 
 func (this *DBConfig) GetDSN() string {
-	return fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%d sslmode=%s", this.Host, this.User, this.Password, this.Name, this.Port, this.SSLMode)
+	dsn := fmt.Sprintf("host=%s user=%s dbname=%s port=%d sslmode=%s", this.Host, this.User, this.Name, this.Port, this.SSLMode)
+	fmt.Println(dsn)
+	return dsn
 }

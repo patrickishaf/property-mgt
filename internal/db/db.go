@@ -21,6 +21,7 @@ func Connect(cfg *config.DBConfig) *gorm.DB {
 
 	db = pg
 	err = db.AutoMigrate(
+		&model.Admin{},
 		&model.Complaint{},
 		&model.ComplaintUpdate{},
 		&model.Installment{},

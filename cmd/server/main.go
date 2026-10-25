@@ -24,7 +24,7 @@ import (
 func main() {
 	cfg := config.LoadConfig()
 	logger := common.CreateLogger()
-	connPool := db.Connect(&cfg.DB)
+	dbConn := db.Connect(&cfg.DB)
 	cacheClient := cache.CreateClient(&cfg.Redis)
 	scheduler := common.CreateScheduler()
 
@@ -33,10 +33,11 @@ func main() {
 	cpaas.NewWorker(cpaasClient, scheduler)
 
 	// repositories
-	repository.CreateJobRepository(&cfg.App, connPool, logger)
+	adminRepo := repository.CreateAdminRepository(dbConn, logger)
+	repository.CreateJobRepository(&cfg.App, dbConn, logger)
 
 	// services
-	authService := auth.CreateService()
+	authService := auth.CreateService(&cfg.App, logger, adminRepo)
 	maintenanceService := maintenance.CreateService()
 	messagingService := messaging.CreateService()
 	paymentService := payment.CreateService()

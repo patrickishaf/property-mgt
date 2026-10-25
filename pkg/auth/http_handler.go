@@ -1,6 +1,8 @@
 package auth
 
 import (
+	"log"
+
 	"github.com/gin-gonic/gin"
 	"github.com/patrickishaf/property-mgt/common"
 )
@@ -17,7 +19,8 @@ func CreateHTTPHandler(srv *service) *httpHandler {
 
 func (this *httpHandler) createOwnerAccount(c *gin.Context) {
 	var body createOwnerAccountReq
-	if err := c.ShouldBindJSON(body); err != nil {
+	if err := c.ShouldBindJSON(&body); err != nil {
+		log.Println("failed to bind hjson", "err", err.Error())
 		c.IndentedJSON(400, common.ErrInvalidRequest)
 		return
 	}
