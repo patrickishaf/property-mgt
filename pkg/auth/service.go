@@ -35,7 +35,7 @@ func (this *service) createOwnerAccount(dto createOwnerAccountReq) common.Servic
 	- find an existing owner with that email
 	- if owner exists, return error
 	*/
-	admin, err := this.adminRepo.FindOneByEmail(dto.Email, common.AdminRoleOwner)
+	admin, err := this.adminRepo.FindOneByEmailAndRole(dto.Email, common.AdminRoleOwner)
 	if err != nil {
 		logger.Error("failed to find existing owner by email", "err", err.Error())
 		return common.ServiceResponse{StatusCode: 500, Err: common.ErrGeneric}
@@ -63,7 +63,7 @@ func (this *service) createOwnerAccount(dto createOwnerAccountReq) common.Servic
 		return common.ServiceResponse{StatusCode: 500, Err: common.ErrGeneric}
 	}
 
-	admin, err = this.adminRepo.FindOneByEmail(dto.Email, common.AdminRoleOwner)
+	admin, err = this.adminRepo.FindOneByEmailAndRole(dto.Email, common.AdminRoleOwner)
 	actor := common.Actor{
 		ID:          admin.ID,
 		Email:       admin.Email,
@@ -133,7 +133,97 @@ func (this *service) getAuthenticatedUser(actor *common.Actor) common.ServiceRes
 }
 
 func (this *service) loginWithPassword(dto passwordLoginReq) common.ServiceResponse {
-	return common.ServiceResponse{StatusCode: 200, Err: common.ErrMethodNotImplemented}
+	logger := this.logger.With("caller", "auth.service.loginWithPassword", "actor", dto.Email)
+
+	if dto.Type == "tenant" {
+		tenant, err := this.tenantRepo.FindOneByEmail(dto.Email)
+		if err != nil {
+			logger.Error("failed to find tenant by email", "err", err.Error())
+			return common.ServiceResponse{StatusCode: 401, Err: common.ErrDBRecordNotFound}
+		}
+
+		if tenant == nil {
+			return common.ServiceResponse{StatusCode: 401, Err: common.ErrInvalidCredentials}
+		}
+
+		yes, err := common.DoPasswordsMatch(dto.Password, tenant.PasswordHash)
+		if err != nil {
+			logger.Error("failed to compare passwords", "err", err.Error())
+			return common.ServiceResponse{StatusCode: 500, Err: common.ErrGeneric}
+		}
+		if !yes {
+			logger.Error("passwords do not match")
+			return common.ServiceResponse{StatusCode: 401, Err: common.ErrInvalidCredentials}
+		}
+
+		actor := common.Actor{
+			ID:          tenant.ID,
+			Email:       tenant.Email,
+			FirstName:   tenant.FirstName,
+			LastName:    tenant.LastName,
+			PhoneNumber: tenant.PhoneNumber,
+			Role:        common.ActorRoleTenant,
+		}
+		accessToken, err := common.GenerateJWT(*this.cfg, actor)
+		if err != nil {
+			logger.Error("failed to generate access token", "err", err.Error())
+			return common.ServiceResponse{StatusCode: 500, Err: common.ErrGeneric}
+		}
+		refreshToken, err := this.generateRefreshToken(actor)
+		if err != nil {
+			logger.Error("failed to generate access token", "err", err.Error())
+			return common.ServiceResponse{StatusCode: 500, Err: common.ErrGeneric}
+		}
+
+		return common.ServiceResponse{StatusCode: 200, Data: map[string]any{
+			"accessToken":  accessToken,
+			"refreshToken": refreshToken,
+		}}
+	} else {
+		admin, err := this.adminRepo.FindOneByEmail(dto.Email)
+		if err != nil {
+			logger.Error("failed to find admin by email", "err", err.Error())
+			return common.ServiceResponse{StatusCode: 401, Err: common.ErrDBRecordNotFound}
+		}
+
+		if admin == nil {
+			return common.ServiceResponse{StatusCode: 401, Err: common.ErrInvalidCredentials}
+		}
+
+		yes, err := common.DoPasswordsMatch(dto.Password, admin.PasswordHash)
+		if err != nil {
+			logger.Error("failed to compare passwords", "err", err.Error())
+			return common.ServiceResponse{StatusCode: 500, Err: common.ErrGeneric}
+		}
+		if !yes {
+			logger.Error("passwords do not match")
+			return common.ServiceResponse{StatusCode: 401, Err: common.ErrInvalidCredentials}
+		}
+
+		actor := common.Actor{
+			ID:          admin.ID,
+			Email:       admin.Email,
+			FirstName:   admin.FirstName,
+			LastName:    admin.LastName,
+			PhoneNumber: admin.PhoneNumber,
+			Role:        common.ActorRoleTenant,
+		}
+		accessToken, err := common.GenerateJWT(*this.cfg, actor)
+		if err != nil {
+			logger.Error("failed to generate access token", "err", err.Error())
+			return common.ServiceResponse{StatusCode: 500, Err: common.ErrGeneric}
+		}
+		refreshToken, err := this.generateRefreshToken(actor)
+		if err != nil {
+			logger.Error("failed to generate access token", "err", err.Error())
+			return common.ServiceResponse{StatusCode: 500, Err: common.ErrGeneric}
+		}
+
+		return common.ServiceResponse{StatusCode: 200, Data: map[string]any{
+			"accessToken":  accessToken,
+			"refreshToken": refreshToken,
+		}}
+	}
 }
 
 func (this *service) refreshAuthToken(ctx context.Context) common.ServiceResponse {

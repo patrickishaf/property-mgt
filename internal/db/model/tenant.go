@@ -8,6 +8,7 @@ import (
 
 type Tenant struct {
 	gorm.Model
+	Email                 string
 	ExpectedAnnualRent    float64
 	FirstName             string
 	LastName              string
@@ -23,6 +24,7 @@ func (t *Tenant) SafeMap() map[string]string {
 	return map[string]string{
 		"id":                    fmt.Sprint(t.ID),
 		"createdAt":             t.CreatedAt.Local().String(),
+		"email":                 t.Email,
 		"expectedAnnualRent":    fmt.Sprint(t.ExpectedAnnualRent),
 		"firstName":             t.FirstName,
 		"lastName":              t.LastName,

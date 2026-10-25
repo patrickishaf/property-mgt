@@ -34,7 +34,19 @@ func (this *AdminRepository) FindOneById(id uint) (*model.Admin, error) {
 	return &a, nil
 }
 
-func (this *AdminRepository) FindOneByEmail(email string, role common.AdminRole) (*model.Admin, error) {
+func (this *AdminRepository) FindOneByEmail(email string) (*model.Admin, error) {
+	var a model.Admin
+	err := this.db.Where(&model.Admin{Email: email}).First(&a).Error
+	if err != nil {
+		if err.Error() == "record not found" {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &a, nil
+}
+
+func (this *AdminRepository) FindOneByEmailAndRole(email string, role common.AdminRole) (*model.Admin, error) {
 	var a model.Admin
 	err := this.db.Where(&model.Admin{Email: email, Role: role.ToString()}).First(&a).Error
 	if err != nil {

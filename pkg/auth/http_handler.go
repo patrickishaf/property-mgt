@@ -55,7 +55,13 @@ func (this *httpHandler) getAuthenticatedUser(c *gin.Context) {
 }
 
 func (this *httpHandler) loginWithPassword(c *gin.Context) {
-	res := this.srv.loginWithPassword(passwordLoginReq{})
+	var body passwordLoginReq
+	if err := c.ShouldBindJSON(&body); err != nil {
+		log.Println("failed to bind json", "err", err.Error())
+		c.IndentedJSON(400, common.ErrInvalidRequest)
+		return
+	}
+	res := this.srv.loginWithPassword(body)
 	if res.Err != "" {
 		c.IndentedJSON(res.StatusCode, res.Err)
 	} else {
