@@ -96,3 +96,15 @@ func (this *PropertyRepository) AddUnitsTRX(id uint, delta int, trx *gorm.DB) er
 	return trx.Model(&model.Property{}).Where("id = ?", id).
 		Update("number_of_units", gorm.Expr("number_of_units + ?", delta)).Error
 }
+
+// scopeToProperties limits a query on a table with a property_id column to the
+// properties an owner owns or a manager manages. Zero IDs are ignored.
+func scopeToProperties(db *gorm.DB, query *gorm.DB, ownerID uint, managerID uint) *gorm.DB {
+	if ownerID != 0 {
+		query = query.Where("property_id IN (?)", db.Model(&model.Property{}).Select("id").Where("owner_id = ?", ownerID))
+	}
+	if managerID != 0 {
+		query = query.Where("property_id IN (?)", db.Model(&model.Property{}).Select("id").Where("manager_id = ?", managerID))
+	}
+	return query
+}

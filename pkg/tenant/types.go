@@ -5,10 +5,12 @@ import "github.com/patrickishaf/property-mgt/internal/db/model"
 const dateLayout = "2006-01-02"
 
 type createLeaseReq struct {
-	DurationType string  `json:"durationType" binding:"required,oneof=annual monthly"`
-	EndDate      string  `json:"endDate" binding:"required,datetime=2006-01-02"`
-	ExpectedRent float64 `json:"expectedRent" binding:"required,gt=0"`
-	StartDate    string  `json:"startDate" binding:"required,datetime=2006-01-02"`
+	AllowPartialPayment  bool    `json:"allowPartialPayment"`
+	DurationType         string  `json:"durationType" binding:"required,oneof=annual monthly"`
+	EndDate              string  `json:"endDate" binding:"required,datetime=2006-01-02"`
+	ExpectedRent         float64 `json:"expectedRent" binding:"required,gt=0"`
+	MinimumPartialAmount float64 `json:"minimumPartialAmount" binding:"gte=0"`
+	StartDate            string  `json:"startDate" binding:"required,datetime=2006-01-02"`
 }
 
 type createTenantReq struct {

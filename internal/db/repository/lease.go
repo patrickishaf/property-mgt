@@ -8,6 +8,7 @@ import (
 	"github.com/patrickishaf/property-mgt/common"
 	"github.com/patrickishaf/property-mgt/internal/db/model"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type LeaseRepository struct {
@@ -103,4 +104,73 @@ func (this *LeaseRepository) RentTotalsByProperty(propertyIDs []uint) (map[uint]
 		totals[r.PropertyID] = RentTotals{Collected: r.Collected, Expected: r.Expected, Outstanding: r.Outstanding}
 	}
 	return totals, nil
+}
+
+func (this *LeaseRepository) FindOneById(id uint) (*model.Lease, error) {
+	var l model.Lease
+	err := this.db.Where("id = ?", id).First(&l).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &l, nil
+}
+
+// FindOneByIdForUpdateTRX loads the lease and locks its row for the rest of the transaction.
+func (this *LeaseRepository) FindOneByIdForUpdateTRX(id uint, trx *gorm.DB) (*model.Lease, error) {
+	var l model.Lease
+	err := trx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", id).First(&l).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &l, nil
+}
+
+func (this *LeaseRepository) FindActiveByTenant(tenantID uint) (*model.Lease, error) {
+	var l model.Lease
+	err := this.db.Where("tenant_id = ? AND status = ?", tenantID, model.LeaseStatusActive).Order("id DESC").First(&l).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &l, nil
+}
+
+func (this *LeaseRepository) Update(id uint, fields map[string]any) error {
+	return this.db.Model(&model.Lease{}).Where("id = ?", id).Updates(fields).Error
+}
+
+func (this *LeaseRepository) UpdateTRX(id uint, fields map[string]any, trx *gorm.DB) error {
+	return trx.Model(&model.Lease{}).Where("id = ?", id).Updates(fields).Error
+}
+
+// PortfolioTotals sums rent over active leases in the scoped properties.
+type PortfolioTotals struct {
+	ActiveTenantCount int64
+	Collected         float64
+	Expected          float64
+	Outstanding       float64
+}
+
+func (this *LeaseRepository) PortfolioTotals(ownerID uint, managerID uint, propertyID uint) (PortfolioTotals, error) {
+	query := scopeToProperties(this.db, this.db.Model(&model.Lease{}), ownerID, managerID).
+		Where("status = ?", model.LeaseStatusActive)
+	if propertyID != 0 {
+		query = query.Where("property_id = ?", propertyID)
+	}
+	var totals PortfolioTotals
+	err := query.Select(
+		"COUNT(DISTINCT tenant_id) AS active_tenant_count, " +
+			"COALESCE(SUM(amount_paid), 0) AS collected, " +
+			"COALESCE(SUM(expected_rent), 0) AS expected, " +
+			"COALESCE(SUM(outstanding_rent), 0) AS outstanding",
+	).Scan(&totals).Error
+	return totals, err
 }

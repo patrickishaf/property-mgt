@@ -97,6 +97,9 @@ func (this *service) createTenant(actor *common.Actor, dto createTenantReq) comm
 	if !endDate.After(startDate) {
 		return common.ServiceResponse{StatusCode: 400, Err: "lease end date must be after start date"}
 	}
+	if dto.Lease.MinimumPartialAmount > dto.Lease.ExpectedRent {
+		return common.ServiceResponse{StatusCode: 400, Err: "minimum partial amount cannot exceed the lease's expected rent"}
+	}
 
 	property, err := this.propertyRepo.FindOneById(dto.PropertyID)
 	if err != nil {
@@ -153,15 +156,17 @@ func (this *service) createTenant(actor *common.Actor, dto createTenantReq) comm
 			return err
 		}
 		lease := model.Lease{
-			DurationType:    dto.Lease.DurationType,
-			EndDate:         endDate,
-			ExpectedRent:    dto.Lease.ExpectedRent,
-			OutstandingRent: dto.Lease.ExpectedRent,
-			PropertyID:      int(property.ID),
-			StartDate:       startDate,
-			Status:          model.LeaseStatusActive,
-			TenantID:        int(tenant.ID),
-			UnitNumber:      dto.UnitNumber,
+			AllowPartialPayment:  dto.Lease.AllowPartialPayment,
+			DurationType:         dto.Lease.DurationType,
+			MinimumPartialAmount: dto.Lease.MinimumPartialAmount,
+			EndDate:              endDate,
+			ExpectedRent:         dto.Lease.ExpectedRent,
+			OutstandingRent:      dto.Lease.ExpectedRent,
+			PropertyID:           int(property.ID),
+			StartDate:            startDate,
+			Status:               model.LeaseStatusActive,
+			TenantID:             int(tenant.ID),
+			UnitNumber:           dto.UnitNumber,
 		}
 		if err := this.leaseRepo.SaveOneTRX(&lease, trx); err != nil {
 			return err

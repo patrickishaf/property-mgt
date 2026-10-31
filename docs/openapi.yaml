@@ -25,6 +25,8 @@ tags:
     description: Properties, units and manager assignment
   - name: Managers
     description: Property manager accounts
+  - name: Payments
+    description: Payments, checkouts, installments and lease payment settings
 
 paths:
   /auth/accounts:
@@ -245,7 +247,7 @@ paths:
                       data:
                         $ref: '#/components/schemas/Tenant'
         '400':
-          description: '`invalid request` (validation) or `lease end date must be after start date`'
+          description: '`invalid request` (validation), `lease end date must be after start date` or `minimum partial amount cannot exceed the lease''s expected rent`'
           content:
             application/json:
               schema:
@@ -1006,6 +1008,546 @@ paths:
         '500':
           $ref: '#/components/responses/ServerError'
 
+  /payments:
+    post:
+      tags: [Payments]
+      operationId: createPayment
+      summary: Record an offline payment
+      description: |
+        Owner or manager of the lease's property. Records money received outside the app and applies it to the
+        lease (or to `installmentIds` first). Partial-payment settings don't apply.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePaymentRequest'
+      responses:
+        '201':
+          description: Payment recorded (`message` is `payment recorded`).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/PaymentDetail'
+        '400':
+          description: '`invalid request`, `amount exceeds outstanding balance` or `invalid installment`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: '`lease not found`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '409':
+          description: '`lease is not active` or `reference already exists`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/ServerError'
+    get:
+      tags: [Payments]
+      operationId: getPayments
+      summary: List payments
+      description: Owners and managers see payments on their properties; tenants see only their own. Newest first.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: propertyId
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: tenantId
+          in: query
+          required: false
+          description: Ignored for tenants.
+          schema:
+            type: integer
+        - name: leaseId
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [unpaid, partially_paid, paid, failed, expired]
+        - name: source
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [offline, checkout]
+        - name: purpose
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [lease, installments, partial]
+        - name: method
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: from
+          in: query
+          required: false
+          description: On or after this date (paidAt, or createdAt if unpaid).
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          required: false
+          description: On or before this date.
+          schema:
+            type: string
+            format: date
+        - $ref: '#/components/parameters/Page'
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+      responses:
+        '200':
+          description: A page of payments.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/PaymentList'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /payments/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Payment ID
+        schema:
+          type: integer
+          minimum: 1
+    get:
+      tags: [Payments]
+      operationId: getPaymentInfo
+      summary: Get a payment
+      description: The payment's tenant, or the owner/manager of its property. Includes allocations and receipt.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: The payment.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/PaymentDetail'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: '`payment not found`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /payments/stats:
+    get:
+      tags: [Payments]
+      operationId: getTotalPaymentStats
+      summary: Portfolio payment totals
+      description: Owner or manager. Totals over active leases and installments on the caller's properties.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: propertyId
+          in: query
+          required: false
+          description: Limit to one property the caller can access.
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Portfolio totals.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Portfolio'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/PropertyNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /payments/checkout:
+    post:
+      tags: [Payments]
+      operationId: initiateCheckout
+      summary: Start a checkout
+      description: |
+        Tenant only, for their active lease. Creates an `unpaid` payment and returns the checkout URL.
+        One open checkout per lease at a time. The provider is currently stubbed.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InitiateCheckoutRequest'
+      responses:
+        '201':
+          description: Checkout created (`message` is `checkout created`).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Payment'
+        '400':
+          description: '`invalid request`, `invalid installment`, `partial payments are not allowed for this lease`, `amount is below the minimum partial amount of <n>` or `amount exceeds outstanding balance`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: '`no active lease`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '409':
+          description: '`lease has no outstanding balance` or `a checkout is already in progress for this lease`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '502':
+          description: '`payment provider unavailable`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /payments/checkout/{reference}/complete:
+    parameters:
+      - name: reference
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      tags: [Payments]
+      operationId: completeCheckout
+      summary: Complete a checkout (development only)
+      description: |
+        Only registered when `APP_ENV=development`; no token required. Simulates the payment provider
+        confirming the checkout and applies the payment.
+      responses:
+        '200':
+          description: Checkout completed (`message` is `checkout completed`).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/PaymentDetail'
+        '404':
+          description: '`payment not found`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '409':
+          description: '`payment is not a checkout`, `payment is not awaiting completion`, `checkout has expired` or `amount exceeds outstanding balance`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /payments/installments:
+    get:
+      tags: [Payments]
+      operationId: getInstallments
+      summary: List installments
+      description: Scoped like payments. Ordered by due date.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: leaseId
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: tenantId
+          in: query
+          required: false
+          description: Ignored for tenants.
+          schema:
+            type: integer
+        - name: propertyId
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [unpaid, partially_paid, paid, overdue]
+        - name: dueBefore
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - $ref: '#/components/parameters/Page'
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+      responses:
+        '200':
+          description: A page of installments.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/InstallmentList'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/ServerError'
+    post:
+      tags: [Payments]
+      operationId: setInstallments
+      summary: Set a lease's installment schedule
+      description: |
+        Owner or manager. Replaces the lease's installments that have received no money. The new items plus
+        the outstanding amounts of kept installments must equal the lease's outstanding rent exactly.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetInstallmentsRequest'
+      responses:
+        '201':
+          description: The lease's full schedule (`message` is `installments set`).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Installment'
+        '400':
+          description: '`invalid request` or `installments must add up to the leases outstanding rent of <n>`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: '`lease not found`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '409':
+          description: '`lease is not active`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /payments/installments/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Installment ID
+        schema:
+          type: integer
+          minimum: 1
+    patch:
+      tags: [Payments]
+      operationId: updateInstallment
+      summary: Change an installment's due date
+      description: Owner or manager. Amounts change only through a new schedule.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateInstallmentRequest'
+      responses:
+        '200':
+          description: The updated installment (`message` is `installment updated`).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Installment'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: '`installment not found`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /payments/leases/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Lease ID
+        schema:
+          type: integer
+          minimum: 1
+    patch:
+      tags: [Payments]
+      operationId: updateLease
+      summary: Set partial-payment settings
+      description: Owner or manager. Only fields sent are changed.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateLeaseRequest'
+      responses:
+        '200':
+          description: The lease (`message` is `lease updated`).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Lease'
+        '400':
+          description: '`invalid request` or `minimum partial amount cannot exceed the leases expected rent`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: '`lease not found`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
 components:
   securitySchemes:
     bearerAuth:
@@ -1323,6 +1865,13 @@ components:
         expectedRent:
           type: number
           exclusiveMinimum: 0
+        allowPartialPayment:
+          type: boolean
+          default: false
+        minimumPartialAmount:
+          type: number
+          minimum: 0
+          description: Must not exceed `expectedRent`.
 
     CreateTenantRequest:
       type: object
@@ -1599,3 +2148,314 @@ components:
         phoneNumber:
           type: string
           minLength: 1
+
+    Payment:
+      type: object
+      required: [id, amount, createdAt, currency, leaseId, method, note, paidAt, propertyId, propertyName, purpose, recordedBy, reference, source, status, targetAmount, tenantFullName, tenantId, unitNumber]
+      properties:
+        id:
+          type: integer
+        amount:
+          type: number
+        checkoutUrl:
+          type: string
+          description: Checkout payments only.
+        createdAt:
+          type: string
+          format: date-time
+        currency:
+          type: string
+          examples: [NGN]
+        expiresAt:
+          type: string
+          format: date-time
+          description: Checkout payments only.
+        leaseId:
+          type: integer
+        method:
+          type: string
+          enum: [cash, bank_transfer, pos, cheque, other, checkout]
+        note:
+          type: string
+        paidAt:
+          type: [string, 'null']
+          format: date-time
+        propertyId:
+          type: integer
+        propertyName:
+          type: string
+        purpose:
+          type: string
+          enum: [lease, installments, partial]
+        recordedBy:
+          type: [integer, 'null']
+        reference:
+          type: string
+        source:
+          type: string
+          enum: [offline, checkout]
+        status:
+          type: string
+          enum: [unpaid, partially_paid, paid, failed, expired]
+        targetAmount:
+          type: number
+        tenantFullName:
+          type: string
+        tenantId:
+          type: integer
+        unitNumber:
+          type: string
+
+    PaymentAllocation:
+      type: object
+      required: [amount, installmentId]
+      properties:
+        amount:
+          type: number
+        installmentId:
+          type: [integer, 'null']
+          description: Null when applied to a lease without installments.
+
+    Receipt:
+      type: object
+      description: All values except `id` are strings.
+      properties:
+        id:
+          type: integer
+        amountPaid:
+          type: string
+        installmentAmount:
+          type: string
+        installmentAmountPaid:
+          type: string
+        installmentDueDate:
+          type: string
+        installmentStatus:
+          type: string
+        outstandingInstallmentAmount:
+          type: string
+        paymentDate:
+          type: string
+        paymentMethod:
+          type: string
+        previousPaymentAmount:
+          type: string
+        senderEmail:
+          type: string
+        senderFullName:
+          type: string
+
+    PaymentDetail:
+      allOf:
+        - $ref: '#/components/schemas/Payment'
+        - type: object
+          required: [allocations, receipt]
+          properties:
+            allocations:
+              type: array
+              items:
+                $ref: '#/components/schemas/PaymentAllocation'
+            receipt:
+              oneOf:
+                - $ref: '#/components/schemas/Receipt'
+                - type: 'null'
+
+    Installment:
+      type: object
+      required: [id, amountExpected, amountPaid, dueDate, lastPaymentDate, leaseId, outstandingAmount, overdue, propertyId, status, tenantId]
+      properties:
+        id:
+          type: integer
+        amountExpected:
+          type: number
+        amountPaid:
+          type: number
+        dueDate:
+          type: string
+          format: date
+        lastPaymentDate:
+          type: [string, 'null']
+          format: date-time
+        leaseId:
+          type: integer
+        outstandingAmount:
+          type: number
+        overdue:
+          type: boolean
+        propertyId:
+          type: integer
+        status:
+          type: string
+          enum: [unpaid, partially_paid, paid]
+        tenantId:
+          type: integer
+
+    Lease:
+      type: object
+      required: [id, allowPartialPayment, amountPaid, durationType, endDate, expectedRent, minimumPartialAmount, outstandingRent, propertyId, startDate, status, tenantId, unitNumber]
+      properties:
+        id:
+          type: integer
+        allowPartialPayment:
+          type: boolean
+        amountPaid:
+          type: number
+        durationType:
+          type: string
+          enum: [annual, monthly]
+        endDate:
+          type: string
+          format: date
+        expectedRent:
+          type: number
+        minimumPartialAmount:
+          type: number
+        outstandingRent:
+          type: number
+        propertyId:
+          type: integer
+        startDate:
+          type: string
+          format: date
+        status:
+          type: string
+        tenantId:
+          type: integer
+        unitNumber:
+          type: string
+
+    Portfolio:
+      type: object
+      required: [activeTenantCount, openInstallmentCount, outstandingRentBalance, overdueInstallmentCount, percentageRentCollected, totalOverdueAmount, totalRentCollected, totalRentExpected]
+      properties:
+        activeTenantCount:
+          type: integer
+        openInstallmentCount:
+          type: integer
+        outstandingRentBalance:
+          type: number
+        overdueInstallmentCount:
+          type: integer
+        percentageRentCollected:
+          type: number
+        totalOverdueAmount:
+          type: number
+        totalRentCollected:
+          type: number
+        totalRentExpected:
+          type: number
+
+    PaymentList:
+      type: object
+      required: [items, page, limit, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Payment'
+        page:
+          type: integer
+        limit:
+          type: integer
+        total:
+          type: integer
+
+    InstallmentList:
+      type: object
+      required: [items, page, limit, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Installment'
+        page:
+          type: integer
+        limit:
+          type: integer
+        total:
+          type: integer
+
+    CreatePaymentRequest:
+      type: object
+      required: [leaseId, amount, method]
+      properties:
+        leaseId:
+          type: integer
+          minimum: 1
+        amount:
+          type: number
+          exclusiveMinimum: 0
+          description: Must not exceed the lease's outstanding rent.
+        method:
+          type: string
+          enum: [cash, bank_transfer, pos, cheque, other]
+        paidAt:
+          type: string
+          format: date
+        reference:
+          type: string
+          description: Must be unique; generated if omitted.
+        note:
+          type: string
+        installmentIds:
+          type: array
+          items:
+            type: integer
+            minimum: 1
+
+    InitiateCheckoutRequest:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [lease, installments, partial]
+        installmentIds:
+          type: array
+          description: Required for `installments`.
+          items:
+            type: integer
+            minimum: 1
+        amount:
+          type: number
+          exclusiveMinimum: 0
+          description: Required for `partial`; between the lease's minimum partial amount and its outstanding rent.
+
+    SetInstallmentsRequest:
+      type: object
+      required: [leaseId, items]
+      properties:
+        leaseId:
+          type: integer
+          minimum: 1
+        items:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [amount, dueDate]
+            properties:
+              amount:
+                type: number
+                exclusiveMinimum: 0
+              dueDate:
+                type: string
+                format: date
+
+    UpdateInstallmentRequest:
+      type: object
+      required: [dueDate]
+      properties:
+        dueDate:
+          type: string
+          format: date
+
+    UpdateLeaseRequest:
+      type: object
+      properties:
+        allowPartialPayment:
+          type: boolean
+        minimumPartialAmount:
+          type: number
+          minimum: 0
+          description: Must not exceed the lease's expected rent.

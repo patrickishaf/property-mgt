@@ -95,3 +95,7 @@ func (this *TenantRepository) UpdatePasswordHash(id uint, hash string) error {
 func (this *TenantRepository) UpdateProfile(id uint, fields map[string]any) error {
 	return this.db.Model(&model.Tenant{}).Where("id = ?", id).Updates(fields).Error
 }
+
+func (this *TenantRepository) UpdateTRX(id uint, fields map[string]any, trx *gorm.DB) error {
+	return trx.Model(&model.Tenant{}).Where("id = ?", id).Updates(fields).Error
+}

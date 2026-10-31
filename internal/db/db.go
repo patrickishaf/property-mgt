@@ -30,6 +30,7 @@ func Connect(cfg *config.DBConfig) *gorm.DB {
 		&model.Lease{},
 		&model.Message{},
 		&model.Payment{},
+		&model.PaymentAllocation{},
 		&model.Property{},
 		&model.PropertyUnit{},
 		&model.Receipt{},

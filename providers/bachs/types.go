@@ -1,5 +1,9 @@
 package bachs
 
+import "errors"
+
+var ErrNotImplemented = errors.New("bachs: not implemented")
+
 type PriceType string
 
 type CheckoutStatus string
@@ -11,7 +15,8 @@ const (
 	CancelledCheckoutStatus CheckoutStatus = "cancelled"
 )
 
-type createCheckoutSessionBody struct {
+// CreateCheckoutSessionBody is the request body for creating a checkout session.
+type CreateCheckoutSessionBody struct {
 	Pricing struct {
 		Amount          string            `json:"amount"`
 		Currency        string            `json:"currency"`
@@ -33,7 +38,8 @@ type createCheckoutSessionBody struct {
 	SavePaymentMethod bool              `json:"save_payment_method"`
 }
 
-type checkoutRes struct {
+// CheckoutRes is a checkout session returned by Bachs.
+type CheckoutRes struct {
 	CheckoutID        string         `json:"checkout_id"`
 	CheckoutURL       string         `json:"checkout_url"`
 	Status            CheckoutStatus `json:"status"`

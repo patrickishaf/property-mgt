@@ -3,11 +3,13 @@ package config
 type AppConfig struct {
 	AccessTokenExpirationMinutes int    `envconfig:"JWT_AT_EXPIRATION_MINS"`
 	AppName                      string `envconfig:"APP_NAME"`
+	CheckoutExpiryMinutes        int    `envconfig:"CHECKOUT_EXPIRY_MINUTES" default:"30"`
 	Env                          string `envconfig:"APP_ENV" default:"development"`
 	JobBackoffTimeSeconds        int    `envconfig:"JOB_BACKOFF_TIME_SECONDS" default:"10"`
 	JWTSecretKey                 string `envconfig:"JWT_SECRET_KEY"`
 	MaxJobAttemptCount           int    `envconfig:"MAX_JOB_ATTEMPT_COUNT" default:"4"`
 	OTPTimeoutSeconds            int    `envconfig:"OTP_TIMEOUT_SECONDS" default:"180"`
+	PaymentCurrency              string `envconfig:"PAYMENT_CURRENCY" default:"NGN"`
 	PwdResetExpirationSeconds    int    `envconfig:"PASSWORD_RESET_EXPIRATION_SECONDS"`
 	Port                         int    `envconfig:"PORT"`
 	RefreshTokenExpirationHours  int    `envconfig:"JWT_RT_EXPIRATION_HOURS"`

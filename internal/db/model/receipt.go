@@ -4,6 +4,7 @@ import "gorm.io/gorm"
 
 type Receipt struct {
 	gorm.Model
+	PaymentID                     uint `gorm:"index"`
 	AmountPaid                    string
 	OutstandingInstallmentPayment string
 	InstallmentAmount             string

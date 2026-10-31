@@ -19,6 +19,7 @@ import (
 	"github.com/patrickishaf/property-mgt/pkg/property"
 	"github.com/patrickishaf/property-mgt/pkg/settings"
 	"github.com/patrickishaf/property-mgt/pkg/tenant"
+	"github.com/patrickishaf/property-mgt/providers/bachs"
 	"github.com/patrickishaf/property-mgt/providers/cpaas"
 )
 
@@ -28,6 +29,9 @@ func main() {
 	dbConn := db.Connect(&cfg.DB)
 	cacheClient := cache.CreateClient(&cfg.Redis)
 	scheduler := common.CreateScheduler()
+
+	// bachs
+	bachsClient := bachs.CreateClient(&cfg.Bachs, &cfg.App)
 
 	// cpaas
 	cpaasClient := cpaas.NewClient(&cfg.Cpaas)
@@ -40,12 +44,14 @@ func main() {
 	propertyRepo := repository.CreatePropertyRepository(dbConn, logger)
 	tenantRepo := repository.CreateTenantRepository(dbConn, logger)
 	unitRepo := repository.CreateUnitRepository(dbConn, logger)
+	installmentRepo := repository.CreateInstallmentRepository(dbConn, logger)
+	paymentRepo := repository.CreatePaymentRepository(dbConn, logger)
 
 	// services
 	authService := auth.CreateService(&cfg.App, logger, adminRepo, tenantRepo)
 	maintenanceService := maintenance.CreateService()
 	messagingService := messaging.CreateService()
-	paymentService := payment.CreateService()
+	paymentService := payment.CreateService(&cfg.App, logger, dbConn, paymentRepo, installmentRepo, leaseRepo, propertyRepo, tenantRepo, bachsClient)
 	propertyService := property.CreateService(&cfg.App, logger, dbConn, propertyRepo, unitRepo, leaseRepo, adminRepo, jobRepo)
 	settingsService := settings.CreateService()
 	tenantService := tenant.CreateService(&cfg.App, logger, dbConn, tenantRepo, leaseRepo, propertyRepo, jobRepo, unitRepo)
@@ -63,7 +69,7 @@ func main() {
 	authRouter := auth.CreateRouter(&cfg.App, authHTTPHandler, "/auth")
 	maintenanceRouter := maintenance.CreateRouter(maintenanceHTTPHandler, "/maintenance")
 	messagingRouter := messaging.CreateRouter(messagingHTTPHandler, "/messages")
-	paymentRouter := payment.CreateRouter(paymentHTTPHandler, "/payments")
+	paymentRouter := payment.CreateRouter(&cfg.App, paymentHTTPHandler, "/payments")
 	propertyRouter := property.CreateRouter(&cfg.App, propertyHTTPHandler, "/properties")
 	settingsRouter := settings.CreateRouter(settingsHTTPHandler, "/settings")
 	tenantRouter := tenant.CreateRouter(&cfg.App, tenantHTTPHandler, "/tenants")
