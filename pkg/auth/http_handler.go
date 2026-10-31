@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/patrickishaf/property-mgt/common"
+	"github.com/patrickishaf/property-mgt/internal/net"
 )
 
 type httpHandler struct {
@@ -69,11 +70,17 @@ func (this *httpHandler) loginWithPassword(c *gin.Context) {
 	}
 }
 
-func (this *httpHandler) verifyOTP(c *gin.Context) {
-	res := this.srv.verifyOTP(c.Request.Context())
+func (this *httpHandler) refreshAuthToken(c *gin.Context) {
+	var body refreshAuthTokenReq
+	if err := c.ShouldBindJSON(&body); err != nil {
+		log.Println("failed to bind json", "err", err.Error())
+		c.IndentedJSON(400, net.ErrorResponse(common.ErrInvalidRequest, nil))
+		return
+	}
+	res := this.srv.refreshAuthToken(body)
 	if res.Err != "" {
-		c.IndentedJSON(res.StatusCode, res.Err)
+		c.IndentedJSON(res.StatusCode, net.ErrorResponse(res.Err, nil))
 	} else {
-		c.IndentedJSON(res.StatusCode, res.Data)
+		c.IndentedJSON(res.StatusCode, net.SuccessResponse(res.Data, "token refreshed"))
 	}
 }

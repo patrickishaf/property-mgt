@@ -28,5 +28,5 @@ func (this *router) RegisterRoutes(router *gin.RouterGroup) {
 	router.POST("/accounts", this.http.createOwnerAccount)
 	router.GET("/user", net.VerifyJWT(this.cfg.JWTSecretKey), this.http.getAuthenticatedUser)
 	router.POST("/login", this.http.loginWithPassword)
-	router.POST("/otp-verify", this.http.verifyOTP)
+	router.POST("/token/refresh", this.http.refreshAuthToken)
 }

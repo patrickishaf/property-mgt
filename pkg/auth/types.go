@@ -1,10 +1,5 @@
 package auth
 
-import (
-	"github.com/golang-jwt/jwt/v4"
-	"github.com/patrickishaf/property-mgt/common"
-)
-
 type createOwnerAccountReq struct {
 	Email       string `json:"email"`
 	FirstName   string `json:"fname"`
@@ -13,13 +8,13 @@ type createOwnerAccountReq struct {
 	PhoneNumber string `json:"phoneNumber"`
 }
 
-type jwtPayload struct {
-	Actor common.Actor
-	jwt.RegisteredClaims
-}
-
 type passwordLoginReq struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
 	Type     string `json:"accountType"`
+}
+
+type refreshAuthTokenReq struct {
+	AccessToken  string `json:"accessToken" binding:"required"`
+	RefreshToken string `json:"refreshToken" binding:"required"`
 }

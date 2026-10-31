@@ -1,7 +1,6 @@
 package auth
 
 import (
-	"context"
 	"fmt"
 	"log/slog"
 	"time"
@@ -91,8 +90,9 @@ func (this *service) createOwnerAccount(dto createOwnerAccountReq) common.Servic
 
 func (this *service) generateRefreshToken(actor common.Actor) (string, error) {
 	expiryDate := time.Now().Add(time.Hour * time.Duration(this.cfg.RefreshTokenExpirationHours))
-	payload := jwtPayload{
-		Actor: actor,
+	payload := common.Claims{
+		Actor:     actor,
+		TokenType: common.TokenTypeRefresh,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(expiryDate),
 		},
@@ -129,7 +129,8 @@ func (this *service) getAuthenticatedUser(actor *common.Actor) common.ServiceRes
 		}
 		return common.ServiceResponse{StatusCode: 200, Data: tenant.SafeMap()}
 	}
-	return common.ServiceResponse{StatusCode: 200, Err: common.ErrMethodNotImplemented}
+	logger.Error("actor role is unrecognized", "actor_role", actor.Role)
+	return common.ServiceResponse{StatusCode: 400, Err: common.ErrInvalidRequest}
 }
 
 func (this *service) loginWithPassword(dto passwordLoginReq) common.ServiceResponse {
@@ -206,7 +207,7 @@ func (this *service) loginWithPassword(dto passwordLoginReq) common.ServiceRespo
 			FirstName:   admin.FirstName,
 			LastName:    admin.LastName,
 			PhoneNumber: admin.PhoneNumber,
-			Role:        common.ActorRoleTenant,
+			Role:        admin.Role,
 		}
 		accessToken, err := common.GenerateJWT(*this.cfg, actor)
 		if err != nil {
@@ -226,14 +227,73 @@ func (this *service) loginWithPassword(dto passwordLoginReq) common.ServiceRespo
 	}
 }
 
-func (this *service) refreshAuthToken(ctx context.Context) common.ServiceResponse {
-	return common.ServiceResponse{StatusCode: 200, Err: common.ErrMethodNotImplemented}
-}
+func (this *service) refreshAuthToken(dto refreshAuthTokenReq) common.ServiceResponse {
+	logger := this.logger.With("caller", "auth.service.refreshAuthToken")
+	jwtKey := []byte(this.cfg.JWTSecretKey)
 
-func (this *service) validateAccessToken(ctx context.Context) common.ServiceResponse {
-	return common.ServiceResponse{StatusCode: 200, Err: common.ErrMethodNotImplemented}
-}
+	refreshClaims, err := common.ParseJWT(dto.RefreshToken, jwtKey, false)
+	if err != nil || refreshClaims.TokenType != common.TokenTypeRefresh {
+		logger.Error("invalid refresh token")
+		return common.ServiceResponse{StatusCode: 401, Err: common.ErrInvalidToken}
+	}
+	accessClaims, err := common.ParseJWT(dto.AccessToken, jwtKey, true)
+	if err != nil || accessClaims.TokenType != common.TokenTypeAccess {
+		logger.Error("invalid access token")
+		return common.ServiceResponse{StatusCode: 401, Err: common.ErrInvalidToken}
+	}
+	if refreshClaims.Actor.ID != accessClaims.Actor.ID || refreshClaims.Actor.Role != accessClaims.Actor.Role {
+		logger.Error("access and refresh tokens belong to different actors")
+		return common.ServiceResponse{StatusCode: 401, Err: common.ErrInvalidToken}
+	}
 
-func (this *service) verifyOTP(ctx context.Context) common.ServiceResponse {
-	return common.ServiceResponse{StatusCode: 200, Err: common.ErrMethodNotImplemented}
+	claimedActor := refreshClaims.Actor
+	logger = logger.With("actor", claimedActor.Email)
+	var actor common.Actor
+	if claimedActor.Role == common.AdminRoleOwner.ToString() || claimedActor.Role == common.AdminRoleManager.ToString() {
+		admin, err := this.adminRepo.FindOneById(claimedActor.ID)
+		if err != nil {
+			logger.Error("failed to find admin by id", "err", err.Error())
+			return common.ServiceResponse{StatusCode: 500, Err: common.ErrGeneric}
+		}
+		if admin == nil {
+			return common.ServiceResponse{StatusCode: 401, Err: common.ErrInvalidCredentials}
+		}
+		actor = common.Actor{
+			ID:          admin.ID,
+			Email:       admin.Email,
+			FirstName:   admin.FirstName,
+			LastName:    admin.LastName,
+			PhoneNumber: admin.PhoneNumber,
+			Role:        admin.Role,
+		}
+	} else if claimedActor.Role == common.ActorRoleTenant {
+		tenant, err := this.tenantRepo.FindOneById(claimedActor.ID)
+		if err != nil {
+			logger.Error("failed to find tenant by id", "err", err.Error())
+			return common.ServiceResponse{StatusCode: 500, Err: common.ErrGeneric}
+		}
+		if tenant == nil {
+			return common.ServiceResponse{StatusCode: 401, Err: common.ErrInvalidCredentials}
+		}
+		actor = common.Actor{
+			ID:          tenant.ID,
+			Email:       tenant.Email,
+			FirstName:   tenant.FirstName,
+			LastName:    tenant.LastName,
+			PhoneNumber: tenant.PhoneNumber,
+			Role:        common.ActorRoleTenant,
+		}
+	} else {
+		logger.Error("actor role is unrecognized", "actor_role", claimedActor.Role)
+		return common.ServiceResponse{StatusCode: 401, Err: common.ErrInvalidToken}
+	}
+
+	accessToken, err := common.GenerateJWT(*this.cfg, actor)
+	if err != nil {
+		logger.Error("failed to generate access token", "err", err.Error())
+		return common.ServiceResponse{StatusCode: 500, Err: common.ErrGeneric}
+	}
+	return common.ServiceResponse{StatusCode: 200, Data: map[string]any{
+		"accessToken": accessToken,
+	}}
 }
