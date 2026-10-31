@@ -10,6 +10,7 @@ import (
 
 const (
 	TokenTypeAccess  = "access"
+	TokenTypeInvite  = "invite"
 	TokenTypeRefresh = "refresh"
 )
 
@@ -55,6 +56,20 @@ func GenerateJWT(cfg config.AppConfig, actor Actor) (string, error) {
 	claims := Claims{
 		Actor:     actor,
 		TokenType: TokenTypeAccess,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(expirationTime),
+		},
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString([]byte(cfg.JWTSecretKey))
+}
+
+// GenerateInviteJWT creates a short-lived token that lets a new tenant set their password.
+func GenerateInviteJWT(cfg config.AppConfig, actor Actor) (string, error) {
+	expirationTime := time.Now().Add(time.Duration(cfg.PwdResetExpirationSeconds) * time.Second)
+	claims := Claims{
+		Actor:     actor,
+		TokenType: TokenTypeInvite,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(expirationTime),
 		},

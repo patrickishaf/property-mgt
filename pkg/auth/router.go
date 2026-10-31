@@ -29,4 +29,5 @@ func (this *router) RegisterRoutes(router *gin.RouterGroup) {
 	router.GET("/user", net.VerifyJWT(this.cfg.JWTSecretKey), this.http.getAuthenticatedUser)
 	router.POST("/login", this.http.loginWithPassword)
 	router.POST("/token/refresh", this.http.refreshAuthToken)
+	router.POST("/password/set", this.http.setPassword)
 }

@@ -30,3 +30,18 @@ func (this *LeaseRepository) SaveOne(ctx context.Context, lease *model.Lease) er
 	}
 	return nil
 }
+
+func (this *LeaseRepository) SaveOneTRX(lease *model.Lease, trx *gorm.DB) error {
+	return trx.Create(lease).Error
+}
+
+func (this *LeaseRepository) ExistsActiveForUnit(propertyID uint, unitNumber string) (bool, error) {
+	var count int64
+	err := this.db.Model(&model.Lease{}).
+		Where("property_id = ? AND unit_number = ? AND status = ?", propertyID, unitNumber, model.LeaseStatusActive).
+		Count(&count).Error
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v4"
+	"github.com/patrickishaf/property-mgt/config"
 )
 
 var testKey = []byte("test-secret")
@@ -53,5 +54,23 @@ func TestExtractActorFromJWTRejectsRefreshToken(t *testing.T) {
 	}
 	if _, err := ExtractActorFromJWT(signTestToken(t, TokenTypeAccess, time.Hour), testKey); err != nil {
 		t.Fatalf("expected access token to be accepted: %v", err)
+	}
+}
+
+func TestInviteJWTRoundTrip(t *testing.T) {
+	cfg := config.AppConfig{JWTSecretKey: string(testKey), PwdResetExpirationSeconds: 60}
+	token, err := GenerateInviteJWT(cfg, Actor{ID: 9, Role: ActorRoleTenant})
+	if err != nil {
+		t.Fatalf("failed to generate invite token: %v", err)
+	}
+	claims, err := ParseJWT(token, testKey, false)
+	if err != nil {
+		t.Fatalf("failed to parse invite token: %v", err)
+	}
+	if claims.TokenType != TokenTypeInvite || claims.Actor.ID != 9 {
+		t.Fatalf("unexpected claims: %+v", claims)
+	}
+	if _, err := ExtractActorFromJWT(token, testKey); err == nil {
+		t.Fatal("expected invite token to be rejected as an access token")
 	}
 }

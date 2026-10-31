@@ -1,0 +1,716 @@
+openapi: 3.1.0
+info:
+  title: Property Management API
+  version: 0.1.0
+  description: |
+    Contract for the property management backend. The human-readable guide is `docs/API.md`.
+
+    Every response uses the envelope `{status, message, data}`. On errors `data` is `null`
+    and `message` is one of the documented messages.
+
+    Keep this file and `docs/API.md` in sync with every API contract change.
+  license:
+    name: Proprietary
+    identifier: LicenseRef-Proprietary
+servers:
+  - url: http://localhost:3000
+    description: Local development
+security: []
+tags:
+  - name: Auth
+    description: Accounts, login and tokens
+  - name: Tenants
+    description: Tenant onboarding and management
+
+paths:
+  /auth/accounts:
+    post:
+      tags: [Auth]
+      operationId: createOwnerAccount
+      summary: Create an owner account
+      description: Creates a property owner account and returns the user with access and refresh tokens.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOwnerAccountRequest'
+      responses:
+        '200':
+          description: Account created (`message` is `account created`).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/OwnerAccount'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '409':
+          description: '`email already taken`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      operationId: loginWithPassword
+      summary: Log in with email and password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordLoginRequest'
+      responses:
+        '200':
+          description: Logged in (`message` is `login successful`).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/TokenPair'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          description: '`invalid credentials` (unknown email, wrong password, or tenant without a password yet)'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /auth/user:
+    get:
+      tags: [Auth]
+      operationId: getAuthenticatedUser
+      summary: Get the logged-in user
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: The user's profile. Admins get an AdminUser, tenants a TenantUser.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        oneOf:
+                          - $ref: '#/components/schemas/AdminUser'
+                          - $ref: '#/components/schemas/TenantUser'
+        '400':
+          description: '`invalid request` (token carries an unrecognised role)'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: '`record not found in the db` (the user no longer exists)'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /auth/token/refresh:
+    post:
+      tags: [Auth]
+      operationId: refreshAuthToken
+      summary: Get a new access token
+      description: |
+        Exchanges an unexpired refresh token, plus the same user's current (possibly expired)
+        access token, for a new access token. The refresh token is not rotated.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshTokenRequest'
+      responses:
+        '200':
+          description: New access token (`message` is `token refreshed`).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/AccessToken'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          description: |
+            `invalid token` (bad or wrong-type token, expired refresh token, or tokens for different users),
+            or `invalid credentials` (the user no longer exists).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /auth/password/set:
+    post:
+      tags: [Auth]
+      operationId: setPassword
+      summary: Set a tenant's password from an invite
+      description: Uses the invite token from the tenant's invite link. Each invite can be used once.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetPasswordRequest'
+      responses:
+        '200':
+          description: Password set and tenant logged in (`message` is `password set`).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/TokenPair'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          description: '`invalid token` (invalid, expired or non-invite token, or tenant no longer exists)'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '409':
+          description: '`password already set` (the invite was already used)'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /tenants:
+    post:
+      tags: [Tenants]
+      operationId: createTenant
+      summary: Create a tenant and their lease
+      description: |
+        Owner or property manager of the property only. Creates the tenant (without a password)
+        and an active lease, increments the property's occupied units and queues an invite email
+        linking to `<WEB_APP_URL>/set-password?token=<inviteToken>`.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTenantRequest'
+      responses:
+        '201':
+          description: Tenant created (`message` is `tenant created`).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Tenant'
+        '400':
+          description: '`invalid request` (validation) or `lease end date must be after start date`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/PropertyNotFound'
+        '409':
+          description: '`email already taken`, `unit already has an active lease` or `property has no vacant units`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/ServerError'
+    get:
+      tags: [Tenants]
+      operationId: getTenants
+      summary: List tenants
+      description: Owner or property manager only. Lists tenants on properties the caller owns or manages, newest first.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: propertyId
+          in: query
+          required: false
+          description: Only tenants of this property (must be one the caller can access).
+          schema:
+            type: integer
+            minimum: 1
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: A page of tenants.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/TenantList'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/PropertyNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /tenants/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Tenant ID
+        schema:
+          type: integer
+          minimum: 1
+    get:
+      tags: [Tenants]
+      operationId: getTenantInfo
+      summary: Get a tenant
+      description: The tenant themself, or the owner/manager of the tenant's property.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: The tenant.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Tenant'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/TenantNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+    patch:
+      tags: [Tenants]
+      operationId: updateTenantInfo
+      summary: Update a tenant's profile
+      description: The tenant themself, or the owner/manager of the tenant's property. Only fields sent are changed.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTenantRequest'
+      responses:
+        '200':
+          description: The updated tenant (`message` is `tenant updated`).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Tenant'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/TenantNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Access token from login, account creation, refresh or set password.
+
+  responses:
+    InvalidRequest:
+      description: '`invalid request` (body, query or path failed validation)'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            status: error
+            message: invalid request
+            data: null
+    Unauthorized:
+      description: '`invalid request` (missing/malformed Authorization header), `invalid token` or `invalid credentials`'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            status: error
+            message: invalid token
+            data: null
+    Forbidden:
+      description: '`invalid credentials` (the caller''s role may not perform this action)'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    PropertyNotFound:
+      description: '`property not found` (does not exist or the caller cannot access it)'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    TenantNotFound:
+      description: '`tenant not found` (does not exist or the caller cannot access it)'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    ServerError:
+      description: '`something went wrong`'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+
+  schemas:
+    Envelope:
+      type: object
+      required: [status, message, data]
+      properties:
+        status:
+          type: string
+          enum: [success, error]
+        message:
+          type: string
+        data:
+          description: Payload on success; null on error.
+
+    ErrorEnvelope:
+      type: object
+      required: [status, message, data]
+      properties:
+        status:
+          type: string
+          const: error
+        message:
+          type: string
+        data:
+          type: 'null'
+
+    AccessToken:
+      type: object
+      required: [accessToken]
+      properties:
+        accessToken:
+          type: string
+
+    TokenPair:
+      type: object
+      required: [accessToken, refreshToken]
+      properties:
+        accessToken:
+          type: string
+        refreshToken:
+          type: string
+
+    OwnerAccount:
+      type: object
+      required: [user, accessToken, refreshToken]
+      properties:
+        user:
+          $ref: '#/components/schemas/AdminUser'
+        accessToken:
+          type: string
+        refreshToken:
+          type: string
+
+    AdminUser:
+      type: object
+      description: All values are strings. `createdAt` uses Go's `time.String()` format in server-local time.
+      required: [id, createdAt, email, firstName, lastName, phoneNumber, role]
+      properties:
+        id:
+          type: string
+          examples: ['6']
+        createdAt:
+          type: string
+          examples: ['2026-10-31 13:35:59.123456 +0100 WAT']
+        email:
+          type: string
+        firstName:
+          type: string
+        lastName:
+          type: string
+        phoneNumber:
+          type: string
+        role:
+          type: string
+          enum: [owner, property_manager]
+
+    TenantUser:
+      type: object
+      description: All values are strings, including amounts and IDs.
+      required:
+        - id
+        - createdAt
+        - email
+        - expectedAnnualRent
+        - firstName
+        - lastName
+        - leaseId
+        - outstandingAnnualRent
+        - phoneNumber
+        - propertyId
+        - unitNumber
+      properties:
+        id:
+          type: string
+        createdAt:
+          type: string
+        email:
+          type: string
+        expectedAnnualRent:
+          type: string
+          examples: ['1200']
+        firstName:
+          type: string
+        lastName:
+          type: string
+        leaseId:
+          type: string
+        outstandingAnnualRent:
+          type: string
+        phoneNumber:
+          type: string
+        propertyId:
+          type: string
+        unitNumber:
+          type: string
+
+    Tenant:
+      type: object
+      required:
+        - id
+        - email
+        - expectedRent
+        - firstName
+        - lastName
+        - leaseId
+        - outstandingRent
+        - phoneNumber
+        - propertyId
+        - unitNumber
+      properties:
+        id:
+          type: integer
+        email:
+          type: string
+          format: email
+        expectedRent:
+          type: number
+        firstName:
+          type: string
+        lastName:
+          type: string
+        leaseId:
+          type: integer
+        outstandingRent:
+          type: number
+        phoneNumber:
+          type: string
+        propertyId:
+          type: integer
+        unitNumber:
+          type: string
+
+    TenantList:
+      type: object
+      required: [items, page, limit, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Tenant'
+        page:
+          type: integer
+        limit:
+          type: integer
+        total:
+          type: integer
+
+    CreateOwnerAccountRequest:
+      type: object
+      required: [email, fname, lname, password, phoneNumber]
+      properties:
+        email:
+          type: string
+          format: email
+        fname:
+          type: string
+          minLength: 1
+        lname:
+          type: string
+          minLength: 1
+        password:
+          type: string
+          minLength: 8
+        phoneNumber:
+          type: string
+          minLength: 1
+
+    PasswordLoginRequest:
+      type: object
+      required: [email, password, accountType]
+      properties:
+        email:
+          type: string
+        password:
+          type: string
+        accountType:
+          type: string
+          enum: [tenant, admin]
+          description: Owners and property managers use `admin`.
+
+    RefreshTokenRequest:
+      type: object
+      required: [accessToken, refreshToken]
+      properties:
+        accessToken:
+          type: string
+          description: Current access token; may be expired but must have a valid signature.
+        refreshToken:
+          type: string
+          description: Unexpired refresh token for the same user.
+
+    SetPasswordRequest:
+      type: object
+      required: [token, password]
+      properties:
+        token:
+          type: string
+          description: The `token` query parameter from the invite link.
+        password:
+          type: string
+          minLength: 8
+
+    CreateLeaseRequest:
+      type: object
+      required: [startDate, endDate, durationType, expectedRent]
+      properties:
+        startDate:
+          type: string
+          format: date
+        endDate:
+          type: string
+          format: date
+          description: Must be after `startDate`.
+        durationType:
+          type: string
+          enum: [annual, monthly]
+        expectedRent:
+          type: number
+          exclusiveMinimum: 0
+
+    CreateTenantRequest:
+      type: object
+      required: [email, firstName, lastName, phoneNumber, propertyId, unitNumber, lease]
+      properties:
+        email:
+          type: string
+          format: email
+        firstName:
+          type: string
+          minLength: 1
+        lastName:
+          type: string
+          minLength: 1
+        phoneNumber:
+          type: string
+          minLength: 1
+        propertyId:
+          type: integer
+          minimum: 1
+        unitNumber:
+          type: string
+          minLength: 1
+          description: Must not already have an active lease.
+        lease:
+          $ref: '#/components/schemas/CreateLeaseRequest'
+
+    UpdateTenantRequest:
+      type: object
+      description: All fields optional; fields that are sent must be non-empty.
+      properties:
+        firstName:
+          type: string
+          minLength: 1
+        lastName:
+          type: string
+          minLength: 1
+        phoneNumber:
+          type: string
+          minLength: 1

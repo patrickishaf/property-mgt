@@ -11,7 +11,7 @@ type EmailJob struct {
 
 type EmailRecipient struct {
 	Address string
-	name    string
+	Name    string
 }
 
 type EmailType string
@@ -21,4 +21,5 @@ const (
 	EmailTypeScheduledMaintenance EmailType = "scheduled_maintenance"
 	EmailTypePaymentReminder      EmailType = "payment_reminder"
 	EmailTypeGeneralNotice        EmailType = "general_notice"
+	EmailTypeTenantInvite         EmailType = "tenant_invite"
 )

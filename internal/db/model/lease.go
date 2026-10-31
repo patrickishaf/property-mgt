@@ -6,6 +6,8 @@ import (
 	"gorm.io/gorm"
 )
 
+const LeaseStatusActive = "active"
+
 type Lease struct {
 	gorm.Model
 	AmountPaid      float64

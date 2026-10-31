@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"errors"
 	"log/slog"
 	"sync"
 
@@ -26,7 +27,7 @@ func (this *AdminRepository) FindOneById(id uint) (*model.Admin, error) {
 	var a model.Admin
 	err := this.db.Where("id = ?", id).First(&a).Error
 	if err != nil {
-		if err.Error() == "record not found" {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
 		return nil, err
@@ -38,7 +39,7 @@ func (this *AdminRepository) FindOneByEmail(email string) (*model.Admin, error) 
 	var a model.Admin
 	err := this.db.Where(&model.Admin{Email: email}).First(&a).Error
 	if err != nil {
-		if err.Error() == "record not found" {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
 		return nil, err
@@ -50,7 +51,7 @@ func (this *AdminRepository) FindOneByEmailAndRole(email string, role common.Adm
 	var a model.Admin
 	err := this.db.Where(&model.Admin{Email: email, Role: role.ToString()}).First(&a).Error
 	if err != nil {
-		if err.Error() == "record not found" {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
 		return nil, err

@@ -19,7 +19,8 @@ type service struct {
 	tenantRepo *repository.TenantRepository
 }
 
-func CreateService(cfg *config.AppConfig, logger *slog.Logger, adminRepo *repository.AdminRepository, tenantRepo *repository.TenantRepository) *service {
+func CreateService(cfg *config.AppConfig, logger *slog.Logger, adminRepo *repository.AdminRepository, tenantRepo *repository.TenantRepository,
+) *service {
 	return &service{
 		adminRepo:  adminRepo,
 		cfg:        cfg,
@@ -41,7 +42,7 @@ func (this *service) createOwnerAccount(dto createOwnerAccountReq) common.Servic
 	}
 	if admin != nil {
 		logger.Info("admin is nil", "admin", fmt.Sprintf("%+v", admin))
-		return common.ServiceResponse{StatusCode: 401, Err: "email already taken"}
+		return common.ServiceResponse{StatusCode: 409, Err: "email already taken"}
 	}
 
 	pwdHash, err := common.HashPassword(dto.Password)
@@ -143,7 +144,7 @@ func (this *service) loginWithPassword(dto passwordLoginReq) common.ServiceRespo
 			return common.ServiceResponse{StatusCode: 401, Err: common.ErrDBRecordNotFound}
 		}
 
-		if tenant == nil {
+		if tenant == nil || tenant.PasswordHash == "" {
 			return common.ServiceResponse{StatusCode: 401, Err: common.ErrInvalidCredentials}
 		}
 
@@ -295,5 +296,61 @@ func (this *service) refreshAuthToken(dto refreshAuthTokenReq) common.ServiceRes
 	}
 	return common.ServiceResponse{StatusCode: 200, Data: map[string]any{
 		"accessToken": accessToken,
+	}}
+}
+
+func (this *service) setPassword(dto setPasswordReq) common.ServiceResponse {
+	logger := this.logger.With("caller", "auth.service.setPassword")
+
+	claims, err := common.ParseJWT(dto.Token, []byte(this.cfg.JWTSecretKey), false)
+	if err != nil || claims.TokenType != common.TokenTypeInvite || claims.Actor.Role != common.ActorRoleTenant {
+		logger.Error("invalid invite token")
+		return common.ServiceResponse{StatusCode: 401, Err: common.ErrInvalidToken}
+	}
+
+	tenant, err := this.tenantRepo.FindOneById(claims.Actor.ID)
+	if err != nil {
+		logger.Error("failed to find tenant by id", "err", err.Error())
+		return common.ServiceResponse{StatusCode: 500, Err: common.ErrGeneric}
+	}
+	if tenant == nil {
+		return common.ServiceResponse{StatusCode: 401, Err: common.ErrInvalidToken}
+	}
+	logger = logger.With("actor", tenant.Email)
+	if tenant.PasswordHash != "" {
+		return common.ServiceResponse{StatusCode: 409, Err: "password already set"}
+	}
+
+	pwdHash, err := common.HashPassword(dto.Password)
+	if err != nil {
+		logger.Error("failed to hash password", "err", err.Error())
+		return common.ServiceResponse{StatusCode: 500, Err: common.ErrGeneric}
+	}
+	if err := this.tenantRepo.UpdatePasswordHash(tenant.ID, pwdHash); err != nil {
+		logger.Error("failed to save password hash", "err", err.Error())
+		return common.ServiceResponse{StatusCode: 500, Err: common.ErrGeneric}
+	}
+
+	actor := common.Actor{
+		ID:          tenant.ID,
+		Email:       tenant.Email,
+		FirstName:   tenant.FirstName,
+		LastName:    tenant.LastName,
+		PhoneNumber: tenant.PhoneNumber,
+		Role:        common.ActorRoleTenant,
+	}
+	accessToken, err := common.GenerateJWT(*this.cfg, actor)
+	if err != nil {
+		logger.Error("failed to generate access token", "err", err.Error())
+		return common.ServiceResponse{StatusCode: 500, Err: common.ErrGeneric}
+	}
+	refreshToken, err := this.generateRefreshToken(actor)
+	if err != nil {
+		logger.Error("failed to generate refresh token", "err", err.Error())
+		return common.ServiceResponse{StatusCode: 500, Err: common.ErrGeneric}
+	}
+	return common.ServiceResponse{StatusCode: 200, Data: map[string]any{
+		"accessToken":  accessToken,
+		"refreshToken": refreshToken,
 	}}
 }

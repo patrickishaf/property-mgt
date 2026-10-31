@@ -34,7 +34,7 @@ func (this *client) sendEmail(emailType EmailType, recipient EmailRecipient, pay
 			{
 				"email_address": map[string]string{
 					"address": recipient.Address,
-					"name":    recipient.name,
+					"name":    recipient.Name,
 				},
 			},
 		},

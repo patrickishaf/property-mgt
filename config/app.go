@@ -3,6 +3,7 @@ package config
 type AppConfig struct {
 	AccessTokenExpirationMinutes int    `envconfig:"JWT_AT_EXPIRATION_MINS"`
 	AppName                      string `envconfig:"APP_NAME"`
+	Env                          string `envconfig:"APP_ENV" default:"development"`
 	JobBackoffTimeSeconds        int    `envconfig:"JOB_BACKOFF_TIME_SECONDS" default:"10"`
 	JWTSecretKey                 string `envconfig:"JWT_SECRET_KEY"`
 	MaxJobAttemptCount           int    `envconfig:"MAX_JOB_ATTEMPT_COUNT" default:"4"`

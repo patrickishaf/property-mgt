@@ -22,52 +22,30 @@ func (this *httpHandler) createOwnerAccount(c *gin.Context) {
 	var body createOwnerAccountReq
 	if err := c.ShouldBindJSON(&body); err != nil {
 		log.Println("failed to bind json", "err", err.Error())
-		c.IndentedJSON(400, common.ErrInvalidRequest)
+		c.IndentedJSON(400, net.ErrorResponse(common.ErrInvalidRequest, nil))
 		return
 	}
-
-	res := this.srv.createOwnerAccount(body)
-	if res.Err != "" {
-		c.IndentedJSON(res.StatusCode, res.Err)
-	} else {
-		c.IndentedJSON(res.StatusCode, res.Data)
-	}
+	net.Respond(c, this.srv.createOwnerAccount(body), "account created")
 }
 
 func (this *httpHandler) getAuthenticatedUser(c *gin.Context) {
-	value, exists := c.Get(common.CTX_KEY_ACTOR)
-	if !exists {
-		log.Println("no actor in context")
-		c.IndentedJSON(400, common.ErrInvalidCredentials)
+	actor, ok := net.GetActor(c)
+	if !ok {
+		log.Println("no valid actor in context")
+		c.IndentedJSON(401, net.ErrorResponse(common.ErrInvalidCredentials, nil))
 		return
 	}
-	actor, isValid := value.(*common.Actor)
-	if !isValid {
-		log.Println("invalid actor in context")
-		c.IndentedJSON(400, common.ErrInvalidCredentials)
-		return
-	}
-	res := this.srv.getAuthenticatedUser(actor)
-	if res.Err != "" {
-		c.IndentedJSON(res.StatusCode, res.Err)
-	} else {
-		c.IndentedJSON(res.StatusCode, res.Data)
-	}
+	net.Respond(c, this.srv.getAuthenticatedUser(actor), "")
 }
 
 func (this *httpHandler) loginWithPassword(c *gin.Context) {
 	var body passwordLoginReq
 	if err := c.ShouldBindJSON(&body); err != nil {
 		log.Println("failed to bind json", "err", err.Error())
-		c.IndentedJSON(400, common.ErrInvalidRequest)
+		c.IndentedJSON(400, net.ErrorResponse(common.ErrInvalidRequest, nil))
 		return
 	}
-	res := this.srv.loginWithPassword(body)
-	if res.Err != "" {
-		c.IndentedJSON(res.StatusCode, res.Err)
-	} else {
-		c.IndentedJSON(res.StatusCode, res.Data)
-	}
+	net.Respond(c, this.srv.loginWithPassword(body), "login successful")
 }
 
 func (this *httpHandler) refreshAuthToken(c *gin.Context) {
@@ -77,10 +55,15 @@ func (this *httpHandler) refreshAuthToken(c *gin.Context) {
 		c.IndentedJSON(400, net.ErrorResponse(common.ErrInvalidRequest, nil))
 		return
 	}
-	res := this.srv.refreshAuthToken(body)
-	if res.Err != "" {
-		c.IndentedJSON(res.StatusCode, net.ErrorResponse(res.Err, nil))
-	} else {
-		c.IndentedJSON(res.StatusCode, net.SuccessResponse(res.Data, "token refreshed"))
+	net.Respond(c, this.srv.refreshAuthToken(body), "token refreshed")
+}
+
+func (this *httpHandler) setPassword(c *gin.Context) {
+	var body setPasswordReq
+	if err := c.ShouldBindJSON(&body); err != nil {
+		log.Println("failed to bind json", "err", err.Error())
+		c.IndentedJSON(400, net.ErrorResponse(common.ErrInvalidRequest, nil))
+		return
 	}
+	net.Respond(c, this.srv.setPassword(body), "password set")
 }

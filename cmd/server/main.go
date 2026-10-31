@@ -11,6 +11,7 @@ import (
 	"github.com/patrickishaf/property-mgt/internal/db"
 	"github.com/patrickishaf/property-mgt/internal/db/repository"
 	"github.com/patrickishaf/property-mgt/internal/net"
+	"github.com/patrickishaf/property-mgt/pkg/apidocs"
 	"github.com/patrickishaf/property-mgt/pkg/auth"
 	"github.com/patrickishaf/property-mgt/pkg/maintenance"
 	"github.com/patrickishaf/property-mgt/pkg/messaging"
@@ -34,7 +35,9 @@ func main() {
 
 	// repositories
 	adminRepo := repository.CreateAdminRepository(dbConn, logger)
-	repository.CreateJobRepository(&cfg.App, dbConn, logger)
+	jobRepo := repository.CreateJobRepository(&cfg.App, dbConn, logger)
+	leaseRepo := repository.CreateLeaseRepo(dbConn, logger)
+	propertyRepo := repository.CreatePropertyRepository(dbConn, logger)
 	tenantRepo := repository.CreateTenantRepository(dbConn, logger)
 
 	// services
@@ -44,7 +47,7 @@ func main() {
 	paymentService := payment.CreateService()
 	propertyService := property.CreateService()
 	settingsService := settings.CreateService()
-	tenantService := tenant.CreateService()
+	tenantService := tenant.CreateService(&cfg.App, logger, dbConn, tenantRepo, leaseRepo, propertyRepo, jobRepo)
 
 	// http handlers
 	authHTTPHandler := auth.CreateHTTPHandler(authService)
@@ -62,7 +65,7 @@ func main() {
 	paymentRouter := payment.CreateRouter(paymentHTTPHandler, "/payments")
 	propertyRouter := property.CreateRouter(propertyHTTPHandler, "/properties")
 	settingsRouter := settings.CreateRouter(settingsHTTPHandler, "/settings")
-	tenantRouter := tenant.CreateRouter(tenantHTTPHandler, "/tenants")
+	tenantRouter := tenant.CreateRouter(&cfg.App, tenantHTTPHandler, "/tenants")
 
 	srv := net.CreateServer(&cfg.App)
 	srv.ConfigureMidleware([]net.Middleware{
@@ -77,6 +80,9 @@ func main() {
 		settingsRouter,
 		tenantRouter,
 	})
+	if cfg.App.Env == "development" {
+		srv.ConfigureRoutes("", []common.AppRouter{apidocs.CreateRouter("/docs")})
+	}
 	go srv.Run()
 	scheduler.Start()
 

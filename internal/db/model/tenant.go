@@ -8,7 +8,7 @@ import (
 
 type Tenant struct {
 	gorm.Model
-	Email                 string
+	Email                 string `gorm:"uniqueIndex"`
 	ExpectedAnnualRent    float64
 	FirstName             string
 	LastName              string
