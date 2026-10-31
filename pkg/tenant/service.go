@@ -1,7 +1,6 @@
 package tenant
 
 import (
-	"encoding/json"
 	"log/slog"
 	"time"
 
@@ -26,6 +25,7 @@ type service struct {
 	logger       *slog.Logger
 	propertyRepo *repository.PropertyRepository
 	tenantRepo   *repository.TenantRepository
+	unitRepo     *repository.UnitRepository
 }
 
 func CreateService(
@@ -36,6 +36,7 @@ func CreateService(
 	leaseRepo *repository.LeaseRepository,
 	propertyRepo *repository.PropertyRepository,
 	jobRepo *repository.JobRepository,
+	unitRepo *repository.UnitRepository,
 ) *service {
 	return &service{
 		cfg:          cfg,
@@ -45,26 +46,12 @@ func CreateService(
 		logger:       logger,
 		propertyRepo: propertyRepo,
 		tenantRepo:   tenantRepo,
+		unitRepo:     unitRepo,
 	}
 }
 
 func isAdmin(actor *common.Actor) bool {
 	return actor.Role == common.AdminRoleOwner.ToString() || actor.Role == common.AdminRoleManager.ToString()
-}
-
-// canAccessProperty reports whether an admin owns or manages the property.
-func canAccessProperty(actor *common.Actor, property *model.Property) bool {
-	if actor == nil || property == nil {
-		return false
-	}
-	switch actor.Role {
-	case common.AdminRoleOwner.ToString():
-		return property.OwnerID > 0 && uint(property.OwnerID) == actor.ID
-	case common.AdminRoleManager.ToString():
-		return property.ManagerID > 0 && uint(property.ManagerID) == actor.ID
-	default:
-		return false
-	}
 }
 
 // findAccessibleTenant loads a tenant the actor may see. Tenants can only see
@@ -92,7 +79,7 @@ func (this *service) findAccessibleTenant(actor *common.Actor, id uint, logger *
 			logger.Error("failed to find property by id", "err", err.Error())
 			return nil, &common.ServiceResponse{StatusCode: 500, Err: common.ErrGeneric}
 		}
-		if !canAccessProperty(actor, property) {
+		if !property.AccessibleBy(actor) {
 			return nil, &common.ServiceResponse{StatusCode: 404, Err: errNotFound}
 		}
 	}
@@ -116,7 +103,7 @@ func (this *service) createTenant(actor *common.Actor, dto createTenantReq) comm
 		logger.Error("failed to find property by id", "err", err.Error())
 		return common.ServiceResponse{StatusCode: 500, Err: common.ErrGeneric}
 	}
-	if !canAccessProperty(actor, property) {
+	if !property.AccessibleBy(actor) {
 		return common.ServiceResponse{StatusCode: 404, Err: "property not found"}
 	}
 
@@ -129,6 +116,18 @@ func (this *service) createTenant(actor *common.Actor, dto createTenantReq) comm
 		return common.ServiceResponse{StatusCode: 409, Err: "email already taken"}
 	}
 
+	if property.ArchivedAt != nil {
+		return common.ServiceResponse{StatusCode: 409, Err: "property is archived"}
+	}
+	unit, err := this.unitRepo.FindOneByPropertyAndNumber(property.ID, dto.UnitNumber)
+	if err != nil {
+		logger.Error("failed to find unit by number", "err", err.Error())
+		return common.ServiceResponse{StatusCode: 500, Err: common.ErrGeneric}
+	}
+	if unit == nil {
+		return common.ServiceResponse{StatusCode: 404, Err: "unit not found"}
+	}
+
 	occupied, err := this.leaseRepo.ExistsActiveForUnit(property.ID, dto.UnitNumber)
 	if err != nil {
 		logger.Error("failed to check unit occupancy", "err", err.Error())
@@ -136,9 +135,6 @@ func (this *service) createTenant(actor *common.Actor, dto createTenantReq) comm
 	}
 	if occupied {
 		return common.ServiceResponse{StatusCode: 409, Err: "unit already has an active lease"}
-	}
-	if property.NumberOfOccupiedUnits >= property.NumberOfUnits {
-		return common.ServiceResponse{StatusCode: 409, Err: "property has no vacant units"}
 	}
 
 	tenant := model.Tenant{
@@ -178,32 +174,13 @@ func (this *service) createTenant(actor *common.Actor, dto createTenantReq) comm
 			return err
 		}
 
-		inviteToken, err := common.GenerateInviteJWT(*this.cfg, common.Actor{
-			ID:    tenant.ID,
-			Email: tenant.Email,
-			Role:  common.ActorRoleTenant,
-		})
-		if err != nil {
-			return err
-		}
-		inviteLink = this.cfg.WebAppURL + "/set-password?token=" + inviteToken
-		payload, err := json.Marshal(cpaas.EmailJob{
-			Payload:   map[string]string{"firstName": tenant.FirstName, "link": inviteLink},
-			Recipient: cpaas.EmailRecipient{Address: tenant.Email, Name: tenant.FirstName + " " + tenant.LastName},
-			Subject:   "You've been invited to set up your tenant account",
-			Type:      cpaas.EmailTypeTenantInvite,
-		})
-		if err != nil {
-			return err
-		}
-		now := time.Now()
-		_, err = this.jobRepo.SaveDefaultJobTRX(&model.Job{
-			DueDate:         &now,
-			LastScheduledAt: now,
-			Payload:         string(payload),
-			Status:          common.ProcessingStatusPending.String(),
-			Type:            model.JobTypeEmail.String(),
-		}, trx)
+		link, err := cpaas.QueueInviteEmail(this.cfg, this.jobRepo, trx, common.Actor{
+			ID:        tenant.ID,
+			Email:     tenant.Email,
+			FirstName: tenant.FirstName,
+			Role:      common.ActorRoleTenant,
+		}, tenant.FirstName+" "+tenant.LastName, cpaas.EmailTypeTenantInvite, "You've been invited to set up your tenant account")
+		inviteLink = link
 		return err
 	})
 	if err != nil {
@@ -235,7 +212,7 @@ func (this *service) getTenants(actor *common.Actor, dto getTenantsReq) common.S
 			logger.Error("failed to find property by id", "err", err.Error())
 			return common.ServiceResponse{StatusCode: 500, Err: common.ErrGeneric}
 		}
-		if !canAccessProperty(actor, property) {
+		if !property.AccessibleBy(actor) {
 			return common.ServiceResponse{StatusCode: 404, Err: "property not found"}
 		}
 	}

@@ -188,7 +188,7 @@ func (this *service) loginWithPassword(dto passwordLoginReq) common.ServiceRespo
 			return common.ServiceResponse{StatusCode: 401, Err: common.ErrDBRecordNotFound}
 		}
 
-		if admin == nil {
+		if admin == nil || admin.PasswordHash == "" {
 			return common.ServiceResponse{StatusCode: 401, Err: common.ErrInvalidCredentials}
 		}
 
@@ -303,21 +303,60 @@ func (this *service) setPassword(dto setPasswordReq) common.ServiceResponse {
 	logger := this.logger.With("caller", "auth.service.setPassword")
 
 	claims, err := common.ParseJWT(dto.Token, []byte(this.cfg.JWTSecretKey), false)
-	if err != nil || claims.TokenType != common.TokenTypeInvite || claims.Actor.Role != common.ActorRoleTenant {
+	if err != nil || claims.TokenType != common.TokenTypeInvite {
 		logger.Error("invalid invite token")
 		return common.ServiceResponse{StatusCode: 401, Err: common.ErrInvalidToken}
 	}
 
-	tenant, err := this.tenantRepo.FindOneById(claims.Actor.ID)
-	if err != nil {
-		logger.Error("failed to find tenant by id", "err", err.Error())
-		return common.ServiceResponse{StatusCode: 500, Err: common.ErrGeneric}
-	}
-	if tenant == nil {
+	var actor common.Actor
+	var passwordAlreadySet bool
+	var savePasswordHash func(hash string) error
+	switch claims.Actor.Role {
+	case common.ActorRoleTenant:
+		tenant, err := this.tenantRepo.FindOneById(claims.Actor.ID)
+		if err != nil {
+			logger.Error("failed to find tenant by id", "err", err.Error())
+			return common.ServiceResponse{StatusCode: 500, Err: common.ErrGeneric}
+		}
+		if tenant == nil {
+			return common.ServiceResponse{StatusCode: 401, Err: common.ErrInvalidToken}
+		}
+		actor = common.Actor{
+			ID:          tenant.ID,
+			Email:       tenant.Email,
+			FirstName:   tenant.FirstName,
+			LastName:    tenant.LastName,
+			PhoneNumber: tenant.PhoneNumber,
+			Role:        common.ActorRoleTenant,
+		}
+		passwordAlreadySet = tenant.PasswordHash != ""
+		savePasswordHash = func(hash string) error { return this.tenantRepo.UpdatePasswordHash(tenant.ID, hash) }
+	case common.AdminRoleManager.ToString():
+		admin, err := this.adminRepo.FindOneById(claims.Actor.ID)
+		if err != nil {
+			logger.Error("failed to find admin by id", "err", err.Error())
+			return common.ServiceResponse{StatusCode: 500, Err: common.ErrGeneric}
+		}
+		if admin == nil || admin.Role != common.AdminRoleManager.ToString() {
+			return common.ServiceResponse{StatusCode: 401, Err: common.ErrInvalidToken}
+		}
+		actor = common.Actor{
+			ID:          admin.ID,
+			Email:       admin.Email,
+			FirstName:   admin.FirstName,
+			LastName:    admin.LastName,
+			PhoneNumber: admin.PhoneNumber,
+			Role:        admin.Role,
+		}
+		passwordAlreadySet = admin.PasswordHash != ""
+		savePasswordHash = func(hash string) error { return this.adminRepo.UpdatePasswordHash(admin.ID, hash) }
+	default:
+		logger.Error("invite token has unsupported role", "role", claims.Actor.Role)
 		return common.ServiceResponse{StatusCode: 401, Err: common.ErrInvalidToken}
 	}
-	logger = logger.With("actor", tenant.Email)
-	if tenant.PasswordHash != "" {
+
+	logger = logger.With("actor", actor.Email)
+	if passwordAlreadySet {
 		return common.ServiceResponse{StatusCode: 409, Err: "password already set"}
 	}
 
@@ -326,19 +365,11 @@ func (this *service) setPassword(dto setPasswordReq) common.ServiceResponse {
 		logger.Error("failed to hash password", "err", err.Error())
 		return common.ServiceResponse{StatusCode: 500, Err: common.ErrGeneric}
 	}
-	if err := this.tenantRepo.UpdatePasswordHash(tenant.ID, pwdHash); err != nil {
+	if err := savePasswordHash(pwdHash); err != nil {
 		logger.Error("failed to save password hash", "err", err.Error())
 		return common.ServiceResponse{StatusCode: 500, Err: common.ErrGeneric}
 	}
 
-	actor := common.Actor{
-		ID:          tenant.ID,
-		Email:       tenant.Email,
-		FirstName:   tenant.FirstName,
-		LastName:    tenant.LastName,
-		PhoneNumber: tenant.PhoneNumber,
-		Role:        common.ActorRoleTenant,
-	}
 	accessToken, err := common.GenerateJWT(*this.cfg, actor)
 	if err != nil {
 		logger.Error("failed to generate access token", "err", err.Error())

@@ -39,15 +39,16 @@ func main() {
 	leaseRepo := repository.CreateLeaseRepo(dbConn, logger)
 	propertyRepo := repository.CreatePropertyRepository(dbConn, logger)
 	tenantRepo := repository.CreateTenantRepository(dbConn, logger)
+	unitRepo := repository.CreateUnitRepository(dbConn, logger)
 
 	// services
 	authService := auth.CreateService(&cfg.App, logger, adminRepo, tenantRepo)
 	maintenanceService := maintenance.CreateService()
 	messagingService := messaging.CreateService()
 	paymentService := payment.CreateService()
-	propertyService := property.CreateService()
+	propertyService := property.CreateService(&cfg.App, logger, dbConn, propertyRepo, unitRepo, leaseRepo, adminRepo, jobRepo)
 	settingsService := settings.CreateService()
-	tenantService := tenant.CreateService(&cfg.App, logger, dbConn, tenantRepo, leaseRepo, propertyRepo, jobRepo)
+	tenantService := tenant.CreateService(&cfg.App, logger, dbConn, tenantRepo, leaseRepo, propertyRepo, jobRepo, unitRepo)
 
 	// http handlers
 	authHTTPHandler := auth.CreateHTTPHandler(authService)
@@ -63,7 +64,7 @@ func main() {
 	maintenanceRouter := maintenance.CreateRouter(maintenanceHTTPHandler, "/maintenance")
 	messagingRouter := messaging.CreateRouter(messagingHTTPHandler, "/messages")
 	paymentRouter := payment.CreateRouter(paymentHTTPHandler, "/payments")
-	propertyRouter := property.CreateRouter(propertyHTTPHandler, "/properties")
+	propertyRouter := property.CreateRouter(&cfg.App, propertyHTTPHandler, "/properties")
 	settingsRouter := settings.CreateRouter(settingsHTTPHandler, "/settings")
 	tenantRouter := tenant.CreateRouter(&cfg.App, tenantHTTPHandler, "/tenants")
 

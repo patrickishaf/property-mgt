@@ -18,7 +18,7 @@ Human-readable reference for the HTTP API. The machine-readable contract is [`op
   - [`POST /auth/login`](#post-authlogin) – log in with password
   - [`GET /auth/user`](#get-authuser) – current user
   - [`POST /auth/token/refresh`](#post-authtokenrefresh) – new access token
-  - [`POST /auth/password/set`](#post-authpasswordset) – tenant sets password from invite
+  - [`POST /auth/password/set`](#post-authpasswordset) – invited tenant or manager sets password
 - [Tenants](#tenants)
   - [Access rules](#access-rules)
   - [Onboarding flow](#onboarding-flow)
@@ -26,6 +26,26 @@ Human-readable reference for the HTTP API. The machine-readable contract is [`op
   - [`GET /tenants`](#get-tenants) – list tenants
   - [`GET /tenants/{id}`](#get-tenantsid) – get tenant
   - [`PATCH /tenants/{id}`](#patch-tenantsid) – update tenant
+- [Properties](#properties)
+  - [Access rules](#access-rules-1)
+  - [Objects](#property-object)
+  - [`POST /properties`](#post-properties) – create property (with units)
+  - [`GET /properties`](#get-properties) – list properties
+  - [`GET /properties/{id}`](#get-propertiesid) – get property
+  - [`PATCH /properties/{id}`](#patch-propertiesid) – update property
+  - [`POST /properties/{id}/archive`](#post-propertiesidarchive) – archive property
+  - [`PUT /properties/{id}/manager`](#put-propertiesidmanager) – assign manager
+  - [`DELETE /properties/{id}/manager`](#delete-propertiesidmanager) – unassign manager
+  - [`GET /properties/{id}/units`](#get-propertiesidunits) – list units
+  - [`POST /properties/{id}/units`](#post-propertiesidunits) – add unit
+  - [`PATCH /properties/{id}/units/{unitId}`](#patch-propertiesidunitsunitid) – update unit
+  - [`DELETE /properties/{id}/units/{unitId}`](#delete-propertiesidunitsunitid) – delete unit
+- [Property managers](#property-managers)
+  - [`POST /properties/managers`](#post-propertiesmanagers) – create and invite manager
+  - [`GET /properties/managers`](#get-propertiesmanagers) – list managers
+  - [`GET /properties/managers/{id}`](#get-propertiesmanagersid) – get manager
+  - [`PATCH /properties/managers/{id}`](#patch-propertiesmanagersid) – update manager
+  - [`DELETE /properties/managers/{id}`](#delete-propertiesmanagersid) – remove manager
 
 ---
 
@@ -49,7 +69,7 @@ There are three token types. All are HS256 JWTs carrying the user (`actor`) and 
 |---|---|---|---|
 | `access` | login, account creation, refresh, set password | `Authorization` header on protected routes | `JWT_AT_EXPIRATION_MINS` minutes |
 | `refresh` | login, account creation, set password | `POST /auth/token/refresh` | `JWT_RT_EXPIRATION_HOURS` hours |
-| `invite` | `POST /tenants` (sent in the invite email link) | `POST /auth/password/set` | `PASSWORD_RESET_EXPIRATION_SECONDS` seconds |
+| `invite` | `POST /tenants`, `POST /properties/managers` (sent in the invite email link) | `POST /auth/password/set` | `PASSWORD_RESET_EXPIRATION_SECONDS` seconds |
 
 Auth middleware failures on protected routes:
 
@@ -214,7 +234,7 @@ Log in with email and password. **Auth:** none.
 | Status | `message` | When |
 |---|---|---|
 | 400 | `invalid request` | Body fails validation (including an unknown `accountType`) |
-| 401 | `invalid credentials` | Unknown email, wrong password, or a tenant who has not set a password yet |
+| 401 | `invalid credentials` | Unknown email, wrong password, or an invited tenant/manager who has not set a password yet |
 | 500 | `something went wrong` | |
 
 ---
@@ -318,7 +338,7 @@ Exchange a refresh token (plus the current, possibly expired, access token) for 
 
 ### `POST /auth/password/set`
 
-A newly invited tenant sets their password using the token from the invite link, and is logged in. Each invite can be used once. **Auth:** none (invite token is in the body).
+A newly invited tenant or property manager sets their password using the token from the invite link, and is logged in. Each invite can be used once. **Auth:** none (invite token is in the body).
 
 **Request body**
 
@@ -352,7 +372,7 @@ A newly invited tenant sets their password using the token from the invite link,
 | Status | `message` | When |
 |---|---|---|
 | 400 | `invalid request` | Body fails validation |
-| 401 | `invalid token` | Token invalid, expired, not an invite token, or the tenant no longer exists |
+| 401 | `invalid token` | Token invalid, expired, not an invite token, or the invited user no longer exists |
 | 409 | `password already set` | The invite was already used |
 | 500 | `something went wrong` | |
 
@@ -374,7 +394,7 @@ Tenants and properties the caller cannot access return `404`, the same as ones t
 
 ### Onboarding flow
 
-1. An owner or manager calls `POST /tenants`. This creates the tenant (with no password) and an active lease, marks one more unit occupied, and queues an invite email.
+1. An owner or manager calls `POST /tenants` for an existing, vacant unit. This creates the tenant (with no password) and an active lease, increments the property's `numberOfOccupiedUnits`, and queues an invite email.
 2. The tenant opens the link in the email: `<WEB_APP_URL>/set-password?token=<inviteToken>`.
 3. The web app calls `POST /auth/password/set` with that token and the chosen password, and receives tokens.
 4. From then on the tenant logs in with `POST /auth/login` and `accountType: "tenant"`.
@@ -410,8 +430,8 @@ Create a tenant and their lease, and send them an invite. **Auth:** owner or pro
 | `firstName` | string | yes | |
 | `lastName` | string | yes | |
 | `phoneNumber` | string | yes | |
-| `propertyId` | integer | yes | Property the caller owns or manages |
-| `unitNumber` | string | yes | Must not have an active lease |
+| `propertyId` | integer | yes | Property the caller owns or manages; must not be archived |
+| `unitNumber` | string | yes | `number` of an existing [unit](#unit-object) of the property; must not have an active lease |
 | `lease` | object | yes | See below |
 | `lease.startDate` | string | yes | `YYYY-MM-DD` |
 | `lease.endDate` | string | yes | `YYYY-MM-DD`, after `startDate` |
@@ -464,9 +484,10 @@ Create a tenant and their lease, and send them an invite. **Auth:** owner or pro
 | 400 | `lease end date must be after start date` | |
 | 403 | `invalid credentials` | Caller is a tenant |
 | 404 | `property not found` | Property doesn't exist or caller doesn't own/manage it |
+| 404 | `unit not found` | The property has no unit with this `unitNumber` |
 | 409 | `email already taken` | A tenant with this email exists |
+| 409 | `property is archived` | |
 | 409 | `unit already has an active lease` | |
-| 409 | `property has no vacant units` | Occupied units already equal total units |
 | 500 | `something went wrong` | |
 
 ---
@@ -564,4 +585,480 @@ Update a tenant's profile. Only the fields sent are changed. **Auth:** the tenan
 |---|---|---|
 | 400 | `invalid request` | `id` or body fails validation |
 | 404 | `tenant not found` | Tenant doesn't exist or caller can't access it |
+| 500 | `something went wrong` | |
+
+---
+
+## Properties
+
+All property endpoints require an access token.
+
+### Access rules
+
+| Action | `owner` | `property_manager` | `tenant` |
+|---|---|---|---|
+| Create property | Yes (they become the owner) | `403` | `403` |
+| List / get properties | Properties they own | Properties assigned to them | `403` |
+| Update / archive property, assign or unassign manager | Properties they own | `403` on assigned properties | `403` |
+| List / add / update / delete units | Properties they own | Properties assigned to them | `403` |
+
+Properties the caller neither owns nor manages return `404 property not found`.
+
+### Property object
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | integer | |
+| `name` | string | |
+| `type` | string | Free text, e.g. `residential` |
+| `activityStatus` | string | Free text; may be empty |
+| `location` | string | Street address; may be empty |
+| `city`, `state`, `country` | string | |
+| `ownerId` | integer | Owner's admin ID |
+| `managerId` | integer \| null | Assigned manager's admin ID, or `null` |
+| `archivedAt` | string \| null | RFC 3339 timestamp, or `null` if not archived |
+| `numberOfUnits` | integer | Number of units on the property |
+| `numberOfOccupiedUnits` | integer | Units with an active lease |
+| `rentExpected` | number | Sum of `expectedRent` over the property's active leases |
+| `rentCollected` | number | Sum of amounts paid on active leases |
+| `outstandingRent` | number | Sum of rent still owed on active leases |
+
+The rent fields are calculated from leases on every read. The unit counts are stored and kept in step with unit and lease changes in the same database transaction.
+
+### Unit object
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | integer | |
+| `number` | string | Unique within the property; tenants reference units by this value. Cannot be changed. |
+| `floor` | integer | `0` if not set |
+| `label` | string | Optional description |
+| `occupied` | boolean | Whether the unit has an active lease |
+
+---
+
+### `POST /properties`
+
+Create a property, optionally with its units. **Auth:** owner.
+
+**Request body**
+
+| Field | Type | Required | Rules |
+|---|---|---|---|
+| `name` | string | yes | |
+| `type` | string | yes | |
+| `activityStatus` | string | no | |
+| `location` | string | no | |
+| `city` | string | yes | |
+| `state` | string | yes | |
+| `country` | string | yes | |
+| `units` | array | no | Each item: `number` (string, required), `floor` (integer), `label` (string). Numbers must be unique within the request. |
+
+```json
+{
+  "name": "Palm Court",
+  "type": "residential",
+  "location": "12 Admiralty Way",
+  "city": "Lagos",
+  "state": "Lagos",
+  "country": "NG",
+  "units": [
+    { "number": "1A", "floor": 1 },
+    { "number": "1B", "floor": 1, "label": "Corner" }
+  ]
+}
+```
+
+**Response `201`** – `message: "property created"`, `data` is a [Property](#property-object).
+
+```json
+{
+  "status": "success",
+  "message": "property created",
+  "data": {
+    "id": 4,
+    "activityStatus": "",
+    "archivedAt": null,
+    "city": "Lagos",
+    "country": "NG",
+    "location": "12 Admiralty Way",
+    "managerId": null,
+    "name": "Palm Court",
+    "numberOfOccupiedUnits": 0,
+    "numberOfUnits": 2,
+    "outstandingRent": 0,
+    "ownerId": 6,
+    "rentCollected": 0,
+    "rentExpected": 0,
+    "state": "Lagos",
+    "type": "residential"
+  }
+}
+```
+
+**Errors**
+
+| Status | `message` | When |
+|---|---|---|
+| 400 | `invalid request` | Body fails validation |
+| 400 | `duplicate unit number` | Two units in `units` share a `number` |
+| 403 | `invalid credentials` | Caller is not an owner |
+| 500 | `something went wrong` | |
+
+---
+
+### `GET /properties`
+
+List the caller's properties (owned for owners, assigned for managers), newest first. **Auth:** owner or property manager.
+
+**Query parameters**
+
+| Param | Type | Required | Rules |
+|---|---|---|---|
+| `includeArchived` | boolean | no | default `false` |
+| `page` | integer | no | default `1`, min `1` |
+| `limit` | integer | no | default `20`, min `1`, max `100` |
+
+**Response `200`** – `data` is a [paginated](#pagination) list of [Property](#property-object).
+
+**Errors**
+
+| Status | `message` | When |
+|---|---|---|
+| 400 | `invalid request` | Query fails validation |
+| 403 | `invalid credentials` | Caller is a tenant |
+| 500 | `something went wrong` | |
+
+---
+
+### `GET /properties/{id}`
+
+Get one property, including archived ones. **Auth:** owner or assigned manager.
+
+**Response `200`** – `data` is a [Property](#property-object).
+
+**Errors**
+
+| Status | `message` | When |
+|---|---|---|
+| 400 | `invalid request` | `id` is not a positive integer |
+| 403 | `invalid credentials` | Caller is a tenant |
+| 404 | `property not found` | |
+| 500 | `something went wrong` | |
+
+---
+
+### `PATCH /properties/{id}`
+
+Update property details. Only fields sent are changed; unit counts and rent fields cannot be set. **Auth:** owner.
+
+**Request body** – all optional.
+
+| Field | Type | Rules |
+|---|---|---|
+| `name`, `type`, `city`, `state`, `country` | string | non-empty if present |
+| `activityStatus`, `location` | string | may be empty |
+
+```json
+{ "location": "14 Admiralty Way" }
+```
+
+**Response `200`** – `message: "property updated"`, `data` is the updated [Property](#property-object).
+
+**Errors**
+
+| Status | `message` | When |
+|---|---|---|
+| 400 | `invalid request` | `id` or body fails validation |
+| 403 | `invalid credentials` | Caller is a tenant, or the property's manager |
+| 404 | `property not found` | |
+| 500 | `something went wrong` | |
+
+---
+
+### `POST /properties/{id}/archive`
+
+Archive a property. Archived properties are hidden from `GET /properties` unless `includeArchived=true`, and reject new units and tenants. There is no unarchive yet. **Auth:** owner.
+
+**Response `200`** – `message: "property archived"`, `data` is the [Property](#property-object) with `archivedAt` set.
+
+**Errors**
+
+| Status | `message` | When |
+|---|---|---|
+| 400 | `invalid request` | `id` is not a positive integer |
+| 403 | `invalid credentials` | Caller is a tenant, or the property's manager |
+| 404 | `property not found` | |
+| 409 | `property is already archived` | |
+| 409 | `property has active leases` | |
+| 500 | `something went wrong` | |
+
+---
+
+### `PUT /properties/{id}/manager`
+
+Assign a manager to a property, replacing any current one. **Auth:** owner.
+
+**Request body**
+
+| Field | Type | Required | Rules |
+|---|---|---|---|
+| `managerId` | integer | yes | A manager created by the caller |
+
+```json
+{ "managerId": 19 }
+```
+
+**Response `200`** – `message: "manager assigned"`, `data` is the updated [Property](#property-object).
+
+**Errors**
+
+| Status | `message` | When |
+|---|---|---|
+| 400 | `invalid request` | `id` or body fails validation |
+| 403 | `invalid credentials` | Caller is a tenant, or the property's manager |
+| 404 | `property not found` | |
+| 404 | `manager not found` | No manager with this ID belongs to the caller |
+| 500 | `something went wrong` | |
+
+---
+
+### `DELETE /properties/{id}/manager`
+
+Remove the property's manager. Succeeds even if none is assigned. **Auth:** owner.
+
+**Response `200`** – `message: "manager unassigned"`, `data` is the updated [Property](#property-object) with `managerId: null`.
+
+**Errors**
+
+| Status | `message` | When |
+|---|---|---|
+| 400 | `invalid request` | `id` is not a positive integer |
+| 403 | `invalid credentials` | Caller is a tenant, or the property's manager |
+| 404 | `property not found` | |
+| 500 | `something went wrong` | |
+
+---
+
+### `GET /properties/{id}/units`
+
+List the property's units, ordered by `number`. **Auth:** owner or assigned manager.
+
+**Response `200`** – `data` is an array of [Unit](#unit-object) (not paginated).
+
+```json
+{
+  "status": "success",
+  "message": "",
+  "data": [
+    { "id": 7, "floor": 1, "label": "", "number": "1A", "occupied": true },
+    { "id": 8, "floor": 1, "label": "Corner", "number": "1B", "occupied": false }
+  ]
+}
+```
+
+**Errors**
+
+| Status | `message` | When |
+|---|---|---|
+| 400 | `invalid request` | `id` is not a positive integer |
+| 403 | `invalid credentials` | Caller is a tenant |
+| 404 | `property not found` | |
+| 500 | `something went wrong` | |
+
+---
+
+### `POST /properties/{id}/units`
+
+Add a unit. Increments `numberOfUnits` in the same transaction. **Auth:** owner or assigned manager.
+
+**Request body**
+
+| Field | Type | Required | Rules |
+|---|---|---|---|
+| `number` | string | yes | Unique within the property |
+| `floor` | integer | no | |
+| `label` | string | no | |
+
+```json
+{ "number": "2A", "floor": 2 }
+```
+
+**Response `201`** – `message: "unit created"`, `data` is a [Unit](#unit-object).
+
+**Errors**
+
+| Status | `message` | When |
+|---|---|---|
+| 400 | `invalid request` | `id` or body fails validation |
+| 403 | `invalid credentials` | Caller is a tenant |
+| 404 | `property not found` | |
+| 409 | `property is archived` | |
+| 409 | `unit number already exists` | |
+| 500 | `something went wrong` | |
+
+---
+
+### `PATCH /properties/{id}/units/{unitId}`
+
+Update a unit's floor or label. The `number` cannot be changed because leases reference it. **Auth:** owner or assigned manager.
+
+**Request body** – all optional.
+
+| Field | Type |
+|---|---|
+| `floor` | integer |
+| `label` | string |
+
+**Response `200`** – `message: "unit updated"`, `data` is the updated [Unit](#unit-object).
+
+**Errors**
+
+| Status | `message` | When |
+|---|---|---|
+| 400 | `invalid request` | Path or body fails validation |
+| 403 | `invalid credentials` | Caller is a tenant |
+| 404 | `property not found` | |
+| 404 | `unit not found` | No unit with this ID on the property |
+| 500 | `something went wrong` | |
+
+---
+
+### `DELETE /properties/{id}/units/{unitId}`
+
+Delete a vacant unit. Decrements `numberOfUnits` in the same transaction; the unit number can then be reused. **Auth:** owner or assigned manager.
+
+**Response `200`** – `message: "unit deleted"`, `data` is `null`.
+
+**Errors**
+
+| Status | `message` | When |
+|---|---|---|
+| 400 | `invalid request` | Path fails validation |
+| 403 | `invalid credentials` | Caller is a tenant |
+| 404 | `property not found` | |
+| 404 | `unit not found` | |
+| 409 | `unit is occupied` | The unit has an active lease |
+| 500 | `something went wrong` | |
+
+---
+
+## Property managers
+
+Managers are admin accounts with role `property_manager`, created by an owner and belonging to that owner. They log in with `POST /auth/login` and `accountType: "admin"`.
+
+Onboarding works like tenants: `POST /properties/managers` queues an invite email linking to `<WEB_APP_URL>/set-password?token=<inviteToken>`; the manager sets a password with `POST /auth/password/set`. In development the link is also logged.
+
+### Manager object
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | integer | Admin ID (use as `managerId`) |
+| `email`, `firstName`, `lastName`, `phoneNumber` | string | |
+| `status` | string | `invited` until a password is set, then `active` |
+
+---
+
+### `POST /properties/managers`
+
+Create a manager and send them an invite. **Auth:** owner.
+
+**Request body**
+
+| Field | Type | Required | Rules |
+|---|---|---|---|
+| `email` | string | yes | valid email; not used by any admin (owner or manager) |
+| `firstName` | string | yes | |
+| `lastName` | string | yes | |
+| `phoneNumber` | string | yes | |
+
+```json
+{
+  "email": "mia@example.com",
+  "firstName": "Mia",
+  "lastName": "Okoro",
+  "phoneNumber": "07012345678"
+}
+```
+
+**Response `201`** – `message: "manager created"`, `data` is a [Manager](#manager-object) with `status: "invited"`.
+
+**Errors**
+
+| Status | `message` | When |
+|---|---|---|
+| 400 | `invalid request` | Body fails validation |
+| 403 | `invalid credentials` | Caller is not an owner |
+| 409 | `email already taken` | |
+| 500 | `something went wrong` | |
+
+---
+
+### `GET /properties/managers`
+
+List the caller's managers, newest first. **Auth:** owner.
+
+**Query parameters:** `page`, `limit` (see [Pagination](#pagination)).
+
+**Response `200`** – `data` is a paginated list of [Manager](#manager-object).
+
+**Errors**
+
+| Status | `message` | When |
+|---|---|---|
+| 400 | `invalid request` | Query fails validation |
+| 403 | `invalid credentials` | Caller is not an owner |
+| 500 | `something went wrong` | |
+
+---
+
+### `GET /properties/managers/{id}`
+
+Get a manager. **Auth:** the owner the manager belongs to, or the manager themself.
+
+**Response `200`** – `data` is a [Manager](#manager-object).
+
+**Errors**
+
+| Status | `message` | When |
+|---|---|---|
+| 400 | `invalid request` | `id` is not a positive integer |
+| 403 | `invalid credentials` | Caller is a tenant |
+| 404 | `manager not found` | No such manager, or it isn't the caller's (or the caller themself) |
+| 500 | `something went wrong` | |
+
+---
+
+### `PATCH /properties/managers/{id}`
+
+Update a manager's profile. Only fields sent are changed. **Auth:** owner.
+
+**Request body** – all optional; non-empty if present: `firstName`, `lastName`, `phoneNumber`.
+
+**Response `200`** – `message: "manager updated"`, `data` is the updated [Manager](#manager-object).
+
+**Errors**
+
+| Status | `message` | When |
+|---|---|---|
+| 400 | `invalid request` | `id` or body fails validation |
+| 403 | `invalid credentials` | Caller is not an owner |
+| 404 | `manager not found` | |
+| 500 | `something went wrong` | |
+
+---
+
+### `DELETE /properties/managers/{id}`
+
+Remove a manager. In one transaction, unassigns them from every property and deletes their account. They can no longer log in or refresh tokens; an access token they already hold stays valid until it expires but grants no property access. **Auth:** owner.
+
+**Response `200`** – `message: "manager removed"`, `data` is `null`.
+
+**Errors**
+
+| Status | `message` | When |
+|---|---|---|
+| 400 | `invalid request` | `id` is not a positive integer |
+| 403 | `invalid credentials` | Caller is not an owner |
+| 404 | `manager not found` | |
 | 500 | `something went wrong` | |

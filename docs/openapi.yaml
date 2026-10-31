@@ -21,6 +21,10 @@ tags:
     description: Accounts, login and tokens
   - name: Tenants
     description: Tenant onboarding and management
+  - name: Properties
+    description: Properties, units and manager assignment
+  - name: Managers
+    description: Property manager accounts
 
 paths:
   /auth/accounts:
@@ -84,7 +88,7 @@ paths:
         '400':
           $ref: '#/components/responses/InvalidRequest'
         '401':
-          description: '`invalid credentials` (unknown email, wrong password, or tenant without a password yet)'
+          description: '`invalid credentials` (unknown email, wrong password, or invited tenant/manager without a password yet)'
           content:
             application/json:
               schema:
@@ -173,8 +177,8 @@ paths:
     post:
       tags: [Auth]
       operationId: setPassword
-      summary: Set a tenant's password from an invite
-      description: Uses the invite token from the tenant's invite link. Each invite can be used once.
+      summary: Set a password from an invite
+      description: Used by invited tenants and property managers, with the token from their invite link. Each invite can be used once.
       requestBody:
         required: true
         content:
@@ -196,7 +200,7 @@ paths:
         '400':
           $ref: '#/components/responses/InvalidRequest'
         '401':
-          description: '`invalid token` (invalid, expired or non-invite token, or tenant no longer exists)'
+          description: '`invalid token` (invalid, expired or non-invite token, or the invited user no longer exists)'
           content:
             application/json:
               schema:
@@ -216,7 +220,8 @@ paths:
       operationId: createTenant
       summary: Create a tenant and their lease
       description: |
-        Owner or property manager of the property only. Creates the tenant (without a password)
+        Owner or property manager of the property only. The unit must exist on the property and be vacant,
+        and the property must not be archived. Creates the tenant (without a password)
         and an active lease, increments the property's occupied units and queues an invite email
         linking to `<WEB_APP_URL>/set-password?token=<inviteToken>`.
       security:
@@ -250,9 +255,13 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
-          $ref: '#/components/responses/PropertyNotFound'
+          description: '`property not found` or `unit not found`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
         '409':
-          description: '`email already taken`, `unit already has an active lease` or `property has no vacant units`'
+          description: '`email already taken`, `property is archived` or `unit already has an active lease`'
           content:
             application/json:
               schema:
@@ -382,6 +391,621 @@ paths:
         '500':
           $ref: '#/components/responses/ServerError'
 
+  /properties:
+    post:
+      tags: [Properties]
+      operationId: createProperty
+      summary: Create a property
+      description: Owner only. Creates the property and any units in one transaction; `numberOfUnits` equals the number of units sent.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePropertyRequest'
+      responses:
+        '201':
+          description: Property created (`message` is `property created`).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Property'
+        '400':
+          description: '`invalid request` (validation) or `duplicate unit number`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/ServerError'
+    get:
+      tags: [Properties]
+      operationId: getProperties
+      summary: List properties
+      description: Owners get properties they own; managers get properties assigned to them. Newest first.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: includeArchived
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: A page of properties.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/PropertyList'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /properties/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Property ID
+        schema:
+          type: integer
+          minimum: 1
+    get:
+      tags: [Properties]
+      operationId: getPropertyInfo
+      summary: Get a property
+      description: Owner or assigned manager. Archived properties are returned too.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: The property.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Property'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/PropertyNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+    patch:
+      tags: [Properties]
+      operationId: updatePropertyInfo
+      summary: Update a property
+      description: Owner only (the property's manager gets 403). Only fields sent are changed.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePropertyRequest'
+      responses:
+        '200':
+          description: The updated property (`message` is `property updated`).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Property'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/PropertyNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /properties/{id}/archive:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Property ID
+        schema:
+          type: integer
+          minimum: 1
+    post:
+      tags: [Properties]
+      operationId: archiveProperty
+      summary: Archive a property
+      description: Owner only. Archived properties are hidden from lists by default and reject new units and tenants.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: The archived property (`message` is `property archived`).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Property'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/PropertyNotFound'
+        '409':
+          description: '`property is already archived` or `property has active leases`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /properties/{id}/manager:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Property ID
+        schema:
+          type: integer
+          minimum: 1
+    put:
+      tags: [Properties]
+      operationId: assignPropertyManager
+      summary: Assign a manager
+      description: Owner only. The manager must belong to the caller. Replaces any current manager.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssignManagerRequest'
+      responses:
+        '200':
+          description: The updated property (`message` is `manager assigned`).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Property'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: '`property not found` or `manager not found`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/ServerError'
+    delete:
+      tags: [Properties]
+      operationId: unassignPropertyManager
+      summary: Unassign the manager
+      description: Owner only. Succeeds even if no manager is assigned.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: The updated property with `managerId` null (`message` is `manager unassigned`).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Property'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/PropertyNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /properties/{id}/units:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Property ID
+        schema:
+          type: integer
+          minimum: 1
+    get:
+      tags: [Properties]
+      operationId: getUnits
+      summary: List units
+      description: Owner or assigned manager. Ordered by `number`; not paginated.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: The property's units.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Unit'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/PropertyNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+    post:
+      tags: [Properties]
+      operationId: createUnit
+      summary: Add a unit
+      description: Owner or assigned manager. Increments `numberOfUnits` in the same transaction.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUnitRequest'
+      responses:
+        '201':
+          description: Unit created (`message` is `unit created`).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Unit'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/PropertyNotFound'
+        '409':
+          description: '`property is archived` or `unit number already exists`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /properties/{id}/units/{unitId}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Property ID
+        schema:
+          type: integer
+          minimum: 1
+      - name: unitId
+        in: path
+        required: true
+        description: Unit ID
+        schema:
+          type: integer
+          minimum: 1
+    patch:
+      tags: [Properties]
+      operationId: updateUnit
+      summary: Update a unit
+      description: Owner or assigned manager. Only `floor` and `label` can change.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUnitRequest'
+      responses:
+        '200':
+          description: The updated unit (`message` is `unit updated`).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Unit'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: '`property not found` or `unit not found`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/ServerError'
+    delete:
+      tags: [Properties]
+      operationId: deleteUnit
+      summary: Delete a unit
+      description: Owner or assigned manager. Only vacant units; decrements `numberOfUnits` in the same transaction.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Unit deleted (`message` is `unit deleted`, `data` is null).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: '`property not found` or `unit not found`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '409':
+          description: '`unit is occupied`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /properties/managers:
+    post:
+      tags: [Managers]
+      operationId: createPropertyManager
+      summary: Create and invite a manager
+      description: |
+        Owner only. Creates an admin with role `property_manager` belonging to the caller, without a password,
+        and queues an invite email linking to `<WEB_APP_URL>/set-password?token=<inviteToken>`.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateManagerRequest'
+      responses:
+        '201':
+          description: Manager created (`message` is `manager created`).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Manager'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: '`email already taken` (any admin)'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/ServerError'
+    get:
+      tags: [Managers]
+      operationId: getPropertyManagers
+      summary: List managers
+      description: Owner only. The caller's managers, newest first.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: A page of managers.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ManagerList'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /properties/managers/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Manager (admin) ID
+        schema:
+          type: integer
+          minimum: 1
+    get:
+      tags: [Managers]
+      operationId: getPropertyManager
+      summary: Get a manager
+      description: The owner the manager belongs to, or the manager themself.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: The manager.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Manager'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ManagerNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+    patch:
+      tags: [Managers]
+      operationId: updatePropertyManager
+      summary: Update a manager
+      description: Owner only. Only fields sent are changed.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateManagerRequest'
+      responses:
+        '200':
+          description: The updated manager (`message` is `manager updated`).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Manager'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ManagerNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+    delete:
+      tags: [Managers]
+      operationId: removePropertyManager
+      summary: Remove a manager
+      description: Owner only. Unassigns the manager from all properties and deletes the account in one transaction.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Manager removed (`message` is `manager removed`, `data` is null).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/ManagerNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
 components:
   securitySchemes:
     bearerAuth:
@@ -389,6 +1013,25 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: Access token from login, account creation, refresh or set password.
+
+  parameters:
+    Page:
+      name: page
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
 
   responses:
     InvalidRequest:
@@ -419,6 +1062,12 @@ components:
             $ref: '#/components/schemas/ErrorEnvelope'
     PropertyNotFound:
       description: '`property not found` (does not exist or the caller cannot access it)'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    ManagerNotFound:
+      description: '`manager not found` (does not exist or does not belong to the caller)'
       content:
         application/json:
           schema:
@@ -697,11 +1346,247 @@ components:
         unitNumber:
           type: string
           minLength: 1
-          description: Must not already have an active lease.
+          description: The `number` of an existing unit of the property, which must not have an active lease.
         lease:
           $ref: '#/components/schemas/CreateLeaseRequest'
 
     UpdateTenantRequest:
+      type: object
+      description: All fields optional; fields that are sent must be non-empty.
+      properties:
+        firstName:
+          type: string
+          minLength: 1
+        lastName:
+          type: string
+          minLength: 1
+        phoneNumber:
+          type: string
+          minLength: 1
+
+    Property:
+      type: object
+      required:
+        - id
+        - activityStatus
+        - archivedAt
+        - city
+        - country
+        - location
+        - managerId
+        - name
+        - numberOfOccupiedUnits
+        - numberOfUnits
+        - outstandingRent
+        - ownerId
+        - rentCollected
+        - rentExpected
+        - state
+        - type
+      properties:
+        id:
+          type: integer
+        activityStatus:
+          type: string
+        archivedAt:
+          type: [string, 'null']
+          format: date-time
+        city:
+          type: string
+        country:
+          type: string
+        location:
+          type: string
+        managerId:
+          type: [integer, 'null']
+        name:
+          type: string
+        numberOfOccupiedUnits:
+          type: integer
+        numberOfUnits:
+          type: integer
+        outstandingRent:
+          type: number
+          description: Sum of outstanding rent over active leases.
+        ownerId:
+          type: integer
+        rentCollected:
+          type: number
+          description: Sum of amounts paid on active leases.
+        rentExpected:
+          type: number
+          description: Sum of expected rent over active leases.
+        state:
+          type: string
+        type:
+          type: string
+
+    PropertyList:
+      type: object
+      required: [items, page, limit, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Property'
+        page:
+          type: integer
+        limit:
+          type: integer
+        total:
+          type: integer
+
+    Unit:
+      type: object
+      required: [id, floor, label, number, occupied]
+      properties:
+        id:
+          type: integer
+        floor:
+          type: integer
+        label:
+          type: string
+        number:
+          type: string
+        occupied:
+          type: boolean
+          description: Whether the unit has an active lease.
+
+    Manager:
+      type: object
+      required: [id, email, firstName, lastName, phoneNumber, status]
+      properties:
+        id:
+          type: integer
+        email:
+          type: string
+          format: email
+        firstName:
+          type: string
+        lastName:
+          type: string
+        phoneNumber:
+          type: string
+        status:
+          type: string
+          enum: [invited, active]
+
+    ManagerList:
+      type: object
+      required: [items, page, limit, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Manager'
+        page:
+          type: integer
+        limit:
+          type: integer
+        total:
+          type: integer
+
+    CreateUnitRequest:
+      type: object
+      required: [number]
+      properties:
+        number:
+          type: string
+          minLength: 1
+          description: Unique within the property.
+        floor:
+          type: integer
+        label:
+          type: string
+
+    CreatePropertyRequest:
+      type: object
+      required: [name, type, city, state, country]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        type:
+          type: string
+          minLength: 1
+        activityStatus:
+          type: string
+        location:
+          type: string
+        city:
+          type: string
+          minLength: 1
+        state:
+          type: string
+          minLength: 1
+        country:
+          type: string
+          minLength: 1
+        units:
+          type: array
+          description: Unit numbers must be unique within the request.
+          items:
+            $ref: '#/components/schemas/CreateUnitRequest'
+
+    UpdatePropertyRequest:
+      type: object
+      description: All fields optional.
+      properties:
+        name:
+          type: string
+          minLength: 1
+        type:
+          type: string
+          minLength: 1
+        activityStatus:
+          type: string
+        location:
+          type: string
+        city:
+          type: string
+          minLength: 1
+        state:
+          type: string
+          minLength: 1
+        country:
+          type: string
+          minLength: 1
+
+    AssignManagerRequest:
+      type: object
+      required: [managerId]
+      properties:
+        managerId:
+          type: integer
+          minimum: 1
+
+    UpdateUnitRequest:
+      type: object
+      description: All fields optional.
+      properties:
+        floor:
+          type: integer
+        label:
+          type: string
+
+    CreateManagerRequest:
+      type: object
+      required: [email, firstName, lastName, phoneNumber]
+      properties:
+        email:
+          type: string
+          format: email
+        firstName:
+          type: string
+          minLength: 1
+        lastName:
+          type: string
+          minLength: 1
+        phoneNumber:
+          type: string
+          minLength: 1
+
+    UpdateManagerRequest:
       type: object
       description: All fields optional; fields that are sent must be non-empty.
       properties:

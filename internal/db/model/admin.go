@@ -11,6 +11,7 @@ type Admin struct {
 	Email        string
 	FirstName    string
 	LastName     string
+	OwnerID      *uint `gorm:"index"`
 	PasswordHash string
 	PhoneNumber  string
 	Role         string

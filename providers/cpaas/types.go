@@ -22,4 +22,5 @@ const (
 	EmailTypePaymentReminder      EmailType = "payment_reminder"
 	EmailTypeGeneralNotice        EmailType = "general_notice"
 	EmailTypeTenantInvite         EmailType = "tenant_invite"
+	EmailTypeManagerInvite        EmailType = "manager_invite"
 )

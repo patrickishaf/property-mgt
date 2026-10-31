@@ -45,3 +45,62 @@ func (this *LeaseRepository) ExistsActiveForUnit(propertyID uint, unitNumber str
 	}
 	return count > 0, nil
 }
+
+func (this *LeaseRepository) ExistsActiveForProperty(propertyID uint) (bool, error) {
+	var count int64
+	err := this.db.Model(&model.Lease{}).
+		Where("property_id = ? AND status = ?", propertyID, model.LeaseStatusActive).
+		Count(&count).Error
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+// ActiveUnitNumbers returns the unit numbers of a property that have an active lease.
+func (this *LeaseRepository) ActiveUnitNumbers(propertyID uint) (map[string]bool, error) {
+	var numbers []string
+	err := this.db.Model(&model.Lease{}).
+		Where("property_id = ? AND status = ?", propertyID, model.LeaseStatusActive).
+		Pluck("unit_number", &numbers).Error
+	if err != nil {
+		return nil, err
+	}
+	occupied := make(map[string]bool, len(numbers))
+	for _, n := range numbers {
+		occupied[n] = true
+	}
+	return occupied, nil
+}
+
+type RentTotals struct {
+	Collected   float64
+	Expected    float64
+	Outstanding float64
+}
+
+// RentTotalsByProperty sums rent across the active leases of each property.
+func (this *LeaseRepository) RentTotalsByProperty(propertyIDs []uint) (map[uint]RentTotals, error) {
+	totals := make(map[uint]RentTotals, len(propertyIDs))
+	if len(propertyIDs) == 0 {
+		return totals, nil
+	}
+	var rows []struct {
+		PropertyID  uint
+		Collected   float64
+		Expected    float64
+		Outstanding float64
+	}
+	err := this.db.Model(&model.Lease{}).
+		Select("property_id, COALESCE(SUM(amount_paid), 0) AS collected, COALESCE(SUM(expected_rent), 0) AS expected, COALESCE(SUM(outstanding_rent), 0) AS outstanding").
+		Where("property_id IN ? AND status = ?", propertyIDs, model.LeaseStatusActive).
+		Group("property_id").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range rows {
+		totals[r.PropertyID] = RentTotals{Collected: r.Collected, Expected: r.Expected, Outstanding: r.Outstanding}
+	}
+	return totals, nil
+}
