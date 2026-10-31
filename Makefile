@@ -1,7 +1,12 @@
-.PHONY: run build build-macos build-linux demo
+.PHONY: run dev build build-macos build-linux demo
+
+AIR ?= $(shell command -v air 2>/dev/null || echo "$$(go env GOPATH)/bin/air")
 
 run:
 	go run cmd/server/main.go
+
+dev:
+	$(AIR)
 
 run-web:
 	npm --prefix ./web run dev
