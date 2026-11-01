@@ -57,35 +57,8 @@ type getStatsReq struct {
 type initiateCheckoutReq struct {
 	Amount         float64 `json:"amount" binding:"omitempty,gt=0"`
 	InstallmentIDs []uint  `json:"installmentIds" binding:"omitempty,dive,gt=0"`
+	LeaseID        uint    `json:"leaseId"`
 	Type           string  `json:"type" binding:"required,oneof=lease installments partial"`
-}
-
-type getInstallmentsReq struct {
-	pageReq
-	DueBefore  string `form:"dueBefore" binding:"omitempty,datetime=2006-01-02"`
-	LeaseID    uint   `form:"leaseId"`
-	PropertyID uint   `form:"propertyId"`
-	Status     string `form:"status" binding:"omitempty,oneof=unpaid partially_paid paid overdue"`
-	TenantID   uint   `form:"tenantId"`
-}
-
-type installmentItemReq struct {
-	Amount  float64 `json:"amount" binding:"required,gt=0"`
-	DueDate string  `json:"dueDate" binding:"required,datetime=2006-01-02"`
-}
-
-type setInstallmentsReq struct {
-	Items   []installmentItemReq `json:"items" binding:"required,min=1,dive"`
-	LeaseID uint                 `json:"leaseId" binding:"required"`
-}
-
-type updateInstallmentReq struct {
-	DueDate string `json:"dueDate" binding:"required,datetime=2006-01-02"`
-}
-
-type updateLeaseReq struct {
-	AllowPartialPayment  *bool    `json:"allowPartialPayment"`
-	MinimumPartialAmount *float64 `json:"minimumPartialAmount" binding:"omitempty,gte=0"`
 }
 
 type listRes[T any] struct {
@@ -145,36 +118,6 @@ type paymentDetailRes struct {
 	Receipt     *receiptRes     `json:"receipt"`
 }
 
-type installmentRes struct {
-	ID                uint       `json:"id"`
-	AmountExpected    float64    `json:"amountExpected"`
-	AmountPaid        float64    `json:"amountPaid"`
-	DueDate           string     `json:"dueDate"`
-	LastPaymentDate   *time.Time `json:"lastPaymentDate"`
-	LeaseID           int        `json:"leaseId"`
-	OutstandingAmount float64    `json:"outstandingAmount"`
-	Overdue           bool       `json:"overdue"`
-	PropertyID        int        `json:"propertyId"`
-	Status            string     `json:"status"`
-	TenantID          int        `json:"tenantId"`
-}
-
-type leaseRes struct {
-	ID                   uint    `json:"id"`
-	AllowPartialPayment  bool    `json:"allowPartialPayment"`
-	AmountPaid           float64 `json:"amountPaid"`
-	DurationType         string  `json:"durationType"`
-	EndDate              string  `json:"endDate"`
-	ExpectedRent         float64 `json:"expectedRent"`
-	MinimumPartialAmount float64 `json:"minimumPartialAmount"`
-	OutstandingRent      float64 `json:"outstandingRent"`
-	PropertyID           int     `json:"propertyId"`
-	StartDate            string  `json:"startDate"`
-	Status               string  `json:"status"`
-	TenantID             int     `json:"tenantId"`
-	UnitNumber           string  `json:"unitNumber"`
-}
-
 type portfolioRes struct {
 	ActiveTenantCount       int64   `json:"activeTenantCount"`
 	OpenInstallmentCount    int64   `json:"openInstallmentCount"`
@@ -226,42 +169,5 @@ func toReceiptRes(r model.Receipt) receiptRes {
 		PreviousPaymentAmount:        r.PreviousPaymentAmount,
 		SenderEmail:                  r.SenderEmail,
 		SenderFullName:               r.SenderFullName,
-	}
-}
-
-func toInstallmentRes(i model.Installment, now time.Time) installmentRes {
-	res := installmentRes{
-		ID:                i.ID,
-		AmountExpected:    i.AmountExpected,
-		AmountPaid:        i.AmountPaid,
-		LastPaymentDate:   i.LastPaymentDate,
-		LeaseID:           i.LeaseID,
-		OutstandingAmount: i.OutstandingAmount,
-		Overdue:           i.IsOverdue(now),
-		PropertyID:        i.PropertyID,
-		Status:            i.Status,
-		TenantID:          i.TenantID,
-	}
-	if i.DueDate != nil {
-		res.DueDate = i.DueDate.Format(dateLayout)
-	}
-	return res
-}
-
-func toLeaseRes(l model.Lease) leaseRes {
-	return leaseRes{
-		ID:                   l.ID,
-		AllowPartialPayment:  l.AllowPartialPayment,
-		AmountPaid:           l.AmountPaid,
-		DurationType:         l.DurationType,
-		EndDate:              l.EndDate.Format(dateLayout),
-		ExpectedRent:         l.ExpectedRent,
-		MinimumPartialAmount: l.MinimumPartialAmount,
-		OutstandingRent:      l.OutstandingRent,
-		PropertyID:           l.PropertyID,
-		StartDate:            l.StartDate.Format(dateLayout),
-		Status:               l.Status,
-		TenantID:             l.TenantID,
-		UnitNumber:           l.UnitNumber,
 	}
 }

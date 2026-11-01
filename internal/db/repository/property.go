@@ -108,3 +108,9 @@ func scopeToProperties(db *gorm.DB, query *gorm.DB, ownerID uint, managerID uint
 	}
 	return query
 }
+
+// DecrementOccupiedUnitsTRX lowers the occupied unit count by one, never below zero.
+func (this *PropertyRepository) DecrementOccupiedUnitsTRX(id uint, trx *gorm.DB) error {
+	return trx.Model(&model.Property{}).Where("id = ? AND number_of_occupied_units > 0", id).
+		Update("number_of_occupied_units", gorm.Expr("number_of_occupied_units - 1")).Error
+}

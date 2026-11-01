@@ -6,7 +6,11 @@ import (
 	"gorm.io/gorm"
 )
 
-const LeaseStatusActive = "active"
+const (
+	LeaseStatusActive     = "active"
+	LeaseStatusEnded      = "ended"
+	LeaseStatusTerminated = "terminated"
+)
 
 type Lease struct {
 	gorm.Model
@@ -14,6 +18,7 @@ type Lease struct {
 	AllowPartialPayment  bool
 	DurationType         string // annual or monthly
 	EndDate              time.Time
+	EndedAt              *time.Time
 	ExpectedRent         float64
 	MinimumPartialAmount float64
 	OutstandingRent      float64

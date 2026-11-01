@@ -104,39 +104,3 @@ func (this *httpHandler) initiateCheckout(c *gin.Context) {
 func (this *httpHandler) completeCheckout(c *gin.Context) {
 	net.Respond(c, this.svc.completeCheckout(c.Param("reference")), "checkout completed")
 }
-
-func (this *httpHandler) getInstallments(c *gin.Context) {
-	actor, _, ok := requestActor(c)
-	var query getInstallmentsReq
-	if !ok || !bindQuery(c, &query) {
-		return
-	}
-	net.Respond(c, this.svc.getInstallments(actor, query), "")
-}
-
-func (this *httpHandler) setInstallments(c *gin.Context) {
-	actor, _, ok := requestActor(c)
-	var body setInstallmentsReq
-	if !ok || !bindJSON(c, &body) {
-		return
-	}
-	net.Respond(c, this.svc.setInstallments(actor, body), "installments set")
-}
-
-func (this *httpHandler) updateInstallment(c *gin.Context) {
-	actor, ids, ok := requestActor(c, "id")
-	var body updateInstallmentReq
-	if !ok || !bindJSON(c, &body) {
-		return
-	}
-	net.Respond(c, this.svc.updateInstallment(actor, ids[0], body), "installment updated")
-}
-
-func (this *httpHandler) updateLease(c *gin.Context) {
-	actor, ids, ok := requestActor(c, "id")
-	var body updateLeaseReq
-	if !ok || !bindJSON(c, &body) {
-		return
-	}
-	net.Respond(c, this.svc.updateLease(actor, ids[0], body), "lease updated")
-}

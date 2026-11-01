@@ -37,9 +37,4 @@ func (this *router) RegisterRoutes(router *gin.RouterGroup) {
 	authed.GET("/:id", this.http.getPaymentInfo)
 	authed.GET("/stats", this.http.getTotalPaymentStats)
 	authed.POST("/checkout", this.http.initiateCheckout)
-
-	authed.GET("/installments", this.http.getInstallments)
-	authed.POST("/installments", this.http.setInstallments)
-	authed.PATCH("/installments/:id", this.http.updateInstallment)
-	authed.PATCH("/leases/:id", this.http.updateLease)
 }

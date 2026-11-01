@@ -26,7 +26,9 @@ tags:
   - name: Managers
     description: Property manager accounts
   - name: Payments
-    description: Payments, checkouts, installments and lease payment settings
+    description: Payments and checkouts
+  - name: Leases
+    description: Leases, their lifecycle and installment schedules
 
 paths:
   /auth/accounts:
@@ -1053,7 +1055,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '409':
-          description: '`lease is not active` or `reference already exists`'
+          description: '`reference already exists`'
           content:
             application/json:
               schema:
@@ -1234,7 +1236,8 @@ paths:
       operationId: initiateCheckout
       summary: Start a checkout
       description: |
-        Tenant only, for their active lease. Creates an `unpaid` payment and returns the checkout URL.
+        Tenant only. Pays the given `leaseId`, otherwise the tenant's active lease, otherwise their most recent
+        lease with a balance. Creates an `unpaid` payment and returns the checkout URL.
         One open checkout per lease at a time. The provider is currently stubbed.
       security:
         - bearerAuth: []
@@ -1267,7 +1270,7 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
-          description: '`no active lease`'
+          description: '`lease not found` (leaseId not the tenant''s) or `no lease with an outstanding balance`'
           content:
             application/json:
               schema:
@@ -1328,12 +1331,324 @@ paths:
         '500':
           $ref: '#/components/responses/ServerError'
 
-  /payments/installments:
+  /leases:
     get:
-      tags: [Payments]
+      tags: [Leases]
+      operationId: getLeases
+      summary: List leases
+      description: Owners and managers see leases on their properties; tenants see their own. Newest first.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: propertyId
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: tenantId
+          in: query
+          required: false
+          description: Ignored for tenants.
+          schema:
+            type: integer
+        - name: unitNumber
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [active, ended, terminated]
+        - name: endingBefore
+          in: query
+          required: false
+          description: Leases whose endDate is before this date.
+          schema:
+            type: string
+            format: date
+        - name: hasBalance
+          in: query
+          required: false
+          description: true for rent still owed, false for fully paid.
+          schema:
+            type: boolean
+        - $ref: '#/components/parameters/Page'
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+      responses:
+        '200':
+          description: A page of leases.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/LeaseList'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/ServerError'
+    post:
+      tags: [Leases]
+      operationId: createLease
+      summary: Create a lease for an existing tenant
+      description: |
+        Owner or manager. For a tenant with no active lease (renewal or move). Creates the lease, occupies the
+        unit and points the tenant at the new lease in one transaction.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateLeaseForTenantRequest'
+      responses:
+        '201':
+          description: Lease created (`message` is `lease created`).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/LeaseDetail'
+        '400':
+          description: '`invalid request`, `lease end date must be after start date` or `minimum partial amount cannot exceed the leases expected rent`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: '`tenant not found`, `property not found` or `unit not found`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '409':
+          description: '`property is archived`, `unit already has an active lease` or `tenant already has an active lease`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /leases/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Lease ID
+        schema:
+          type: integer
+          minimum: 1
+    get:
+      tags: [Leases]
+      operationId: getLeaseById
+      summary: Get a lease
+      description: The lease's tenant, or the owner/manager of its property.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: The lease.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/LeaseDetail'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: '`lease not found`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/ServerError'
+    patch:
+      tags: [Leases]
+      operationId: updateLease
+      summary: Update, end or terminate a lease
+      description: |
+        Owner or manager. Partial-payment settings can change in any status. endDate, expectedRent and status
+        need an active lease. expectedRent is refused while installments are owed. Ending or terminating frees
+        the unit; the balance stays owed.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateLeaseRequest'
+      responses:
+        '200':
+          description: The updated lease (`message` is `lease updated`).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/LeaseDetail'
+        '400':
+          description: '`invalid request`, `lease end date must be after start date`, `expected rent cannot be less than the amount already paid (<n>)` or `minimum partial amount cannot exceed the leases expected rent`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: '`lease not found`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '409':
+          description: '`lease is not active` or `lease has unpaid installments`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /leases/{id}/installments:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Lease ID
+        schema:
+          type: integer
+          minimum: 1
+    get:
+      tags: [Leases]
+      operationId: getLeaseInstallments
+      summary: Get a lease's installment schedule
+      description: The lease's tenant, or the owner/manager of its property. Due-date order; not paginated.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: The schedule.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Installment'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: '`lease not found`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/ServerError'
+    post:
+      tags: [Leases]
+      operationId: createLeaseInstallment
+      summary: Set a lease's installment schedule
+      description: |
+        Owner or manager; active leases only. Replaces installments that have received no money. The new items
+        plus the outstanding amounts of kept installments must equal the lease's outstanding rent exactly.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetInstallmentsRequest'
+      responses:
+        '201':
+          description: The lease's full schedule (`message` is `installments set`).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Installment'
+        '400':
+          description: '`invalid request` or `installments must add up to the leases outstanding rent of <n>`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: '`lease not found`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '409':
+          description: '`lease is not active`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /leases/installments:
+    get:
+      tags: [Leases]
       operationId: getInstallments
-      summary: List installments
-      description: Scoped like payments. Ordered by due date.
+      summary: List installments across leases
+      description: Scoped like leases. Ordered by due date.
       security:
         - bearerAuth: []
       parameters:
@@ -1392,61 +1707,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '500':
           $ref: '#/components/responses/ServerError'
-    post:
-      tags: [Payments]
-      operationId: setInstallments
-      summary: Set a lease's installment schedule
-      description: |
-        Owner or manager. Replaces the lease's installments that have received no money. The new items plus
-        the outstanding amounts of kept installments must equal the lease's outstanding rent exactly.
-      security:
-        - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/SetInstallmentsRequest'
-      responses:
-        '201':
-          description: The lease's full schedule (`message` is `installments set`).
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/Envelope'
-                  - type: object
-                    properties:
-                      data:
-                        type: array
-                        items:
-                          $ref: '#/components/schemas/Installment'
-        '400':
-          description: '`invalid request` or `installments must add up to the leases outstanding rent of <n>`'
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          description: '`lease not found`'
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-        '409':
-          description: '`lease is not active`'
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-        '500':
-          $ref: '#/components/responses/ServerError'
 
-  /payments/installments/{id}:
+  /leases/installments/{id}:
     parameters:
       - name: id
         in: path
@@ -1456,7 +1718,7 @@ paths:
           type: integer
           minimum: 1
     patch:
-      tags: [Payments]
+      tags: [Leases]
       operationId: updateInstallment
       summary: Change an installment's due date
       description: Owner or manager. Amounts change only through a new schedule.
@@ -1495,31 +1757,15 @@ paths:
         '500':
           $ref: '#/components/responses/ServerError'
 
-  /payments/leases/{id}:
-    parameters:
-      - name: id
-        in: path
-        required: true
-        description: Lease ID
-        schema:
-          type: integer
-          minimum: 1
-    patch:
-      tags: [Payments]
-      operationId: updateLease
-      summary: Set partial-payment settings
-      description: Owner or manager. Only fields sent are changed.
-      security:
-        - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/UpdateLeaseRequest'
+  /leases/expiry/run:
+    post:
+      tags: [Leases]
+      operationId: runLeaseExpiry
+      summary: Run the lease expiry job (development only)
+      description: Only registered when `APP_ENV=development`; no token required. Ends active leases whose end date has passed.
       responses:
         '200':
-          description: The lease (`message` is `lease updated`).
+          description: Job ran (`message` is `expiry job ran`).
           content:
             application/json:
               schema:
@@ -1528,23 +1774,11 @@ paths:
                   - type: object
                     properties:
                       data:
-                        $ref: '#/components/schemas/Lease'
-        '400':
-          description: '`invalid request` or `minimum partial amount cannot exceed the leases expected rent`'
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          description: '`lease not found`'
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
+                        type: object
+                        required: [ended]
+                        properties:
+                          ended:
+                            type: integer
         '500':
           $ref: '#/components/responses/ServerError'
 
@@ -2292,7 +2526,7 @@ components:
 
     Lease:
       type: object
-      required: [id, allowPartialPayment, amountPaid, durationType, endDate, expectedRent, minimumPartialAmount, outstandingRent, propertyId, startDate, status, tenantId, unitNumber]
+      required: [id, allowPartialPayment, amountPaid, durationType, endDate, endedAt, expectedRent, minimumPartialAmount, outstandingRent, propertyId, startDate, status, tenantId, unitNumber]
       properties:
         id:
           type: integer
@@ -2306,6 +2540,9 @@ components:
         endDate:
           type: string
           format: date
+        endedAt:
+          type: [string, 'null']
+          format: date-time
         expectedRent:
           type: number
         minimumPartialAmount:
@@ -2319,6 +2556,7 @@ components:
           format: date
         status:
           type: string
+          enum: [active, ended, terminated]
         tenantId:
           type: integer
         unitNumber:
@@ -2382,6 +2620,7 @@ components:
         leaseId:
           type: integer
           minimum: 1
+          description: Any status; ended and terminated leases can still be paid.
         amount:
           type: number
           exclusiveMinimum: 0
@@ -2407,6 +2646,10 @@ components:
       type: object
       required: [type]
       properties:
+        leaseId:
+          type: integer
+          minimum: 1
+          description: One of the tenant's own leases. Defaults to the active lease, else the latest lease with a balance.
         type:
           type: string
           enum: [lease, installments, partial]
@@ -2423,11 +2666,8 @@ components:
 
     SetInstallmentsRequest:
       type: object
-      required: [leaseId, items]
+      required: [items]
       properties:
-        leaseId:
-          type: integer
-          minimum: 1
         items:
           type: array
           minItems: 1
@@ -2452,6 +2692,7 @@ components:
 
     UpdateLeaseRequest:
       type: object
+      description: All fields optional.
       properties:
         allowPartialPayment:
           type: boolean
@@ -2459,3 +2700,78 @@ components:
           type: number
           minimum: 0
           description: Must not exceed the lease's expected rent.
+        endDate:
+          type: string
+          format: date
+          description: Active leases only; must be after `startDate`.
+        expectedRent:
+          type: number
+          exclusiveMinimum: 0
+          description: Active leases with no unpaid installments; must be at least `amountPaid`.
+        status:
+          type: string
+          enum: [ended, terminated]
+          description: Active leases only. Frees the unit; the balance stays owed.
+
+    LeaseDetail:
+      allOf:
+        - $ref: '#/components/schemas/Lease'
+        - type: object
+          required: [openInstallmentCount, overdueInstallmentCount, propertyName, tenantFullName]
+          properties:
+            openInstallmentCount:
+              type: integer
+            overdueInstallmentCount:
+              type: integer
+            propertyName:
+              type: string
+            tenantFullName:
+              type: string
+
+    LeaseList:
+      type: object
+      required: [items, page, limit, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Lease'
+        page:
+          type: integer
+        limit:
+          type: integer
+        total:
+          type: integer
+
+    CreateLeaseForTenantRequest:
+      type: object
+      required: [tenantId, propertyId, unitNumber, startDate, endDate, durationType, expectedRent]
+      properties:
+        tenantId:
+          type: integer
+          minimum: 1
+        propertyId:
+          type: integer
+          minimum: 1
+        unitNumber:
+          type: string
+          minLength: 1
+        startDate:
+          type: string
+          format: date
+        endDate:
+          type: string
+          format: date
+          description: Must be after `startDate`.
+        durationType:
+          type: string
+          enum: [annual, monthly]
+        expectedRent:
+          type: number
+          exclusiveMinimum: 0
+        allowPartialPayment:
+          type: boolean
+          default: false
+        minimumPartialAmount:
+          type: number
+          minimum: 0

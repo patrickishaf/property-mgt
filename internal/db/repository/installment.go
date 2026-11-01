@@ -139,3 +139,16 @@ func (this *InstallmentRepository) Stats(ownerID uint, managerID uint, propertyI
 	).Scan(&stats).Error
 	return stats, err
 }
+
+// CountOpenByLease returns how many of the lease's installments still have money
+// owed, and how many of those are overdue.
+func (this *InstallmentRepository) CountOpenByLease(leaseID uint, now time.Time) (open int64, overdue int64, err error) {
+	var row struct {
+		Open    int64
+		Overdue int64
+	}
+	err = this.db.Model(&model.Installment{}).
+		Select("COUNT(*) FILTER (WHERE outstanding_amount > 0) AS open, COUNT(*) FILTER (WHERE outstanding_amount > 0 AND due_date < ?) AS overdue", now).
+		Where("lease_id = ?", leaseID).Scan(&row).Error
+	return row.Open, row.Overdue, err
+}

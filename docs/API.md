@@ -55,10 +55,18 @@ Human-readable reference for the HTTP API. The machine-readable contract is [`op
   - [`GET /payments/stats`](#get-paymentsstats) – portfolio totals
   - [`POST /payments/checkout`](#post-paymentscheckout) – tenant starts a checkout
   - [`POST /payments/checkout/{reference}/complete`](#post-paymentscheckoutreferencecomplete) – complete a checkout (development only)
-  - [`GET /payments/installments`](#get-paymentsinstallments) – list installments
-  - [`POST /payments/installments`](#post-paymentsinstallments) – set a lease's installment schedule
-  - [`PATCH /payments/installments/{id}`](#patch-paymentsinstallmentsid) – change an installment's due date
-  - [`PATCH /payments/leases/{id}`](#patch-paymentsleasesid) – partial-payment settings
+- [Leases](#leases)
+  - [Lease lifecycle](#lease-lifecycle)
+  - [Objects](#lease-object)
+  - [`GET /leases`](#get-leases) – list leases
+  - [`GET /leases/{id}`](#get-leasesid) – get lease
+  - [`POST /leases`](#post-leases) – new lease for an existing tenant
+  - [`PATCH /leases/{id}`](#patch-leasesid) – update, end or terminate a lease
+  - [`GET /leases/{id}/installments`](#get-leasesidinstallments) – a lease's installment schedule
+  - [`POST /leases/{id}/installments`](#post-leasesidinstallments) – set a lease's installment schedule
+  - [`GET /leases/installments`](#get-leasesinstallments) – list installments across leases
+  - [`PATCH /leases/installments/{id}`](#patch-leasesinstallmentsid) – change an installment's due date
+  - [`POST /leases/expiry/run`](#post-leasesexpiryrun) – run the expiry job (development only)
 
 ---
 
@@ -1087,8 +1095,8 @@ All payment endpoints require an access token, except the development-only check
 
 ### How payments work
 
-- A **lease** is what a tenant owes: `expectedRent`, `amountPaid` and `outstandingRent`. Its `allowPartialPayment` and `minimumPartialAmount` settings control partial checkouts.
-- **Installments** optionally split a lease's outstanding rent into scheduled amounts. The installments' outstanding amounts always add up exactly to the lease's `outstandingRent`.
+- A **[lease](#leases)** is what a tenant owes: `expectedRent`, `amountPaid` and `outstandingRent`. Its `allowPartialPayment` and `minimumPartialAmount` settings control partial checkouts. Ended and terminated leases keep their balance, which can still be paid.
+- **[Installments](#installment-object)** optionally split a lease's outstanding rent into scheduled amounts. The installments' outstanding amounts always add up exactly to the lease's `outstandingRent`.
 - A **payment** is money received, either recorded offline by an owner or manager, or paid by the tenant through a checkout. Every completed payment is **allocated**:
   - payments for specific installments go to those installments first;
   - lease and partial payments go to installments in due-date order (oldest first), or directly to the lease if it has no installments;
@@ -1138,35 +1146,6 @@ All payment endpoints require an access token, except the development-only check
 
 **Receipt** – all values are strings: `id` (integer), `senderFullName`, `senderEmail`, `paymentDate` (RFC 3339), `paymentMethod`, `amountPaid`, `previousPaymentAmount` (lease amount paid before this payment), `installmentAmount`, `installmentAmountPaid`, `installmentStatus`, `installmentDueDate`, `outstandingInstallmentAmount`. The installment fields describe the last installment the payment reached; for leases without installments they are empty and `outstandingInstallmentAmount` is the lease's remaining balance.
 
-### Installment object
-
-| Field | Type | Description |
-|---|---|---|
-| `id` | integer | |
-| `leaseId`, `tenantId`, `propertyId` | integer | |
-| `amountExpected` | number | |
-| `amountPaid` | number | |
-| `outstandingAmount` | number | |
-| `dueDate` | string | `YYYY-MM-DD` |
-| `lastPaymentDate` | string \| null | RFC 3339 |
-| `status` | string | `unpaid`, `partially_paid` or `paid` |
-| `overdue` | boolean | `dueDate` has passed and money is still owed |
-
-### Lease object
-
-Returned by `PATCH /payments/leases/{id}`.
-
-| Field | Type |
-|---|---|
-| `id`, `tenantId`, `propertyId` | integer |
-| `unitNumber`, `durationType`, `status` | string |
-| `startDate`, `endDate` | string (`YYYY-MM-DD`) |
-| `expectedRent`, `amountPaid`, `outstandingRent` | number |
-| `allowPartialPayment` | boolean |
-| `minimumPartialAmount` | number |
-
----
-
 ### `POST /payments`
 
 Record money received outside the app (cash, bank transfer, …) and apply it to the lease. Partial-payment settings don't apply because the money has already been received. **Auth:** owner or manager of the lease's property.
@@ -1175,7 +1154,7 @@ Record money received outside the app (cash, bank transfer, …) and apply it to
 
 | Field | Type | Required | Rules |
 |---|---|---|---|
-| `leaseId` | integer | yes | Active lease the caller can access |
+| `leaseId` | integer | yes | A lease the caller can access, in any status (ended and terminated leases can still be paid) |
 | `amount` | number | yes | > 0 and ≤ the lease's outstanding rent |
 | `method` | string | yes | `cash`, `bank_transfer`, `pos`, `cheque` or `other` |
 | `paidAt` | string | no | `YYYY-MM-DD`; defaults to now |
@@ -1248,7 +1227,6 @@ Record money received outside the app (cash, bank transfer, …) and apply it to
 | 400 | `invalid installment` | An ID isn't an unpaid installment of the lease, or is repeated |
 | 403 | `invalid credentials` | Caller is a tenant |
 | 404 | `lease not found` | Lease doesn't exist or caller can't access it |
-| 409 | `lease is not active` | |
 | 409 | `reference already exists` | |
 | 500 | `something went wrong` | |
 
@@ -1349,7 +1327,7 @@ Rent totals across the caller's properties, for the dashboard. Calculated from a
 
 ### `POST /payments/checkout`
 
-Start a checkout for the tenant's active lease. Creates an `unpaid` payment and returns the provider's checkout URL. Only one open checkout per lease is allowed at a time. **Auth:** tenant.
+Start a checkout for one of the tenant's leases: the `leaseId` given, otherwise their active lease, otherwise their most recent lease that still has a balance (for example a terminated lease). Creates an `unpaid` payment and returns the provider's checkout URL. Only one open checkout per lease is allowed at a time. **Auth:** tenant.
 
 > The payment provider (Bachs) is currently stubbed: `checkoutUrl` points to `<WEB_APP_URL>/checkout/stub?reference=…`, and checkouts are completed with the [development-only route](#post-paymentscheckoutreferencecomplete).
 
@@ -1357,6 +1335,7 @@ Start a checkout for the tenant's active lease. Creates an `unpaid` payment and 
 
 | Field | Type | Required | Rules |
 |---|---|---|---|
+| `leaseId` | integer | no | One of the tenant's own leases; see above for the default |
 | `type` | string | yes | `lease` (whole outstanding balance), `installments` or `partial` |
 | `installmentIds` | integer[] | for `installments` | Unpaid installments of the tenant's lease; the amount is their total outstanding |
 | `amount` | number | for `partial` | Lease must allow partial payments; `minimumPartialAmount` ≤ amount ≤ outstanding rent |
@@ -1377,7 +1356,8 @@ Start a checkout for the tenant's active lease. Creates an `unpaid` payment and 
 | 400 | `amount is below the minimum partial amount of <n>` | |
 | 400 | `amount exceeds outstanding balance` | |
 | 403 | `invalid credentials` | Caller is not a tenant |
-| 404 | `no active lease` | |
+| 404 | `lease not found` | `leaseId` isn't one of the tenant's leases |
+| 404 | `no lease with an outstanding balance` | No `leaseId` given, no active lease, and no lease with a balance |
 | 409 | `lease has no outstanding balance` | |
 | 409 | `a checkout is already in progress for this lease` | |
 | 502 | `payment provider unavailable` | The provider failed; the payment is marked `failed` |
@@ -1404,9 +1384,267 @@ Start a checkout for the tenant's active lease. Creates an `unpaid` payment and 
 
 ---
 
-### `GET /payments/installments`
+## Leases
 
-List installments, ordered by due date. **Auth:** any role; scoped like payments.
+All lease endpoints require an access token, except the development-only expiry route. Owners and managers act on leases in properties they own or manage; tenants can read their own leases and installments. Leases the caller can't access return `404 lease not found`.
+
+### Lease lifecycle
+
+| Status | Meaning |
+|---|---|
+| `active` | Current lease; occupies its unit |
+| `ended` | Reached its end date (set by the daily expiry job, or manually) |
+| `terminated` | Ended early by an owner or manager |
+
+- A tenant's first lease is created with the tenant (`POST /tenants`). Later leases (renewals, moving units) use `POST /leases`, once the tenant has no active lease.
+- Ending or terminating a lease frees its unit: the property's `numberOfOccupiedUnits` is decremented in the same transaction.
+- **The balance stays owed.** Ended and terminated leases keep their `outstandingRent` and installments, and can still be paid offline (`POST /payments`) or by checkout (`POST /payments/checkout`).
+- Ended and terminated leases can't be extended, re-scheduled or have their rent changed; only their partial-payment settings can be updated.
+- **Daily expiry job:** once a day the server ends every `active` lease whose `endDate` is before the current date (UTC). A lease ending on a given day stays active through that day.
+
+### Lease object
+
+| Field | Type | Description |
+|---|---|---|
+| `id`, `tenantId`, `propertyId` | integer | |
+| `unitNumber` | string | |
+| `status` | string | `active`, `ended` or `terminated` |
+| `durationType` | string | `annual` or `monthly` |
+| `startDate`, `endDate` | string | `YYYY-MM-DD` |
+| `endedAt` | string \| null | RFC 3339; when the lease was ended or terminated |
+| `expectedRent`, `amountPaid`, `outstandingRent` | number | |
+| `allowPartialPayment` | boolean | |
+| `minimumPartialAmount` | number | |
+
+**Lease detail** (`GET /leases/{id}`, `POST /leases`, `PATCH /leases/{id}`) adds `tenantFullName`, `propertyName`, `openInstallmentCount` (installments with money still owed) and `overdueInstallmentCount`.
+
+### Installment object
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | integer | |
+| `leaseId`, `tenantId`, `propertyId` | integer | |
+| `amountExpected` | number | |
+| `amountPaid` | number | |
+| `outstandingAmount` | number | |
+| `dueDate` | string | `YYYY-MM-DD` |
+| `lastPaymentDate` | string \| null | RFC 3339 |
+| `status` | string | `unpaid`, `partially_paid` or `paid` |
+| `overdue` | boolean | `dueDate` has passed and money is still owed |
+
+---
+
+### `GET /leases`
+
+List leases, newest first. **Auth:** any role; owners and managers see leases on their properties, tenants see their own.
+
+**Query parameters** – all optional.
+
+| Param | Type | Rules |
+|---|---|---|
+| `propertyId` | integer | |
+| `tenantId` | integer | Ignored for tenants |
+| `unitNumber` | string | |
+| `status` | string | `active`, `ended` or `terminated` |
+| `endingBefore` | string | `YYYY-MM-DD`; leases whose `endDate` is before this date |
+| `hasBalance` | boolean | `true`: rent still owed; `false`: fully paid |
+| `page` | integer | default `1`, min `1` |
+| `limit` | integer | **default `10`**, min `1`, max `100` |
+
+**Response `200`** – `data` is a [paginated](#pagination) list of [Lease](#lease-object).
+
+**Errors**
+
+| Status | `message` | When |
+|---|---|---|
+| 400 | `invalid request` | Query fails validation |
+| 500 | `something went wrong` | |
+
+---
+
+### `GET /leases/{id}`
+
+Get one lease. **Auth:** the lease's tenant, or the owner/manager of its property.
+
+**Response `200`** – `data` is a [lease detail](#lease-object).
+
+```json
+{
+  "status": "success",
+  "message": "",
+  "data": {
+    "id": 9,
+    "allowPartialPayment": true,
+    "amountPaid": 0,
+    "durationType": "annual",
+    "endDate": "2027-09-30",
+    "endedAt": null,
+    "expectedRent": 1200,
+    "minimumPartialAmount": 100,
+    "outstandingRent": 1200,
+    "propertyId": 11,
+    "startDate": "2026-10-01",
+    "status": "active",
+    "tenantId": 9,
+    "unitNumber": "1A",
+    "openInstallmentCount": 3,
+    "overdueInstallmentCount": 1,
+    "propertyName": "Palm Court",
+    "tenantFullName": "Ada Obi"
+  }
+}
+```
+
+**Errors**
+
+| Status | `message` | When |
+|---|---|---|
+| 400 | `invalid request` | `id` is not a positive integer |
+| 404 | `lease not found` | |
+| 500 | `something went wrong` | |
+
+---
+
+### `POST /leases`
+
+Create a new lease for an existing tenant who has no active lease, for example a renewal or a move to another unit. In one transaction: creates the lease, increments the property's `numberOfOccupiedUnits`, and points the tenant at the new lease (their unit and rent fields). **Auth:** owner or manager of both the tenant's current property and the new lease's property.
+
+**Request body**
+
+| Field | Type | Required | Rules |
+|---|---|---|---|
+| `tenantId` | integer | yes | |
+| `propertyId` | integer | yes | Not archived |
+| `unitNumber` | string | yes | An existing, vacant unit of the property |
+| `startDate` | string | yes | `YYYY-MM-DD` |
+| `endDate` | string | yes | `YYYY-MM-DD`, after `startDate` |
+| `durationType` | string | yes | `annual` or `monthly` |
+| `expectedRent` | number | yes | > 0 |
+| `allowPartialPayment` | boolean | no | default `false` |
+| `minimumPartialAmount` | number | no | ≥ 0 and ≤ `expectedRent` |
+
+```json
+{
+  "tenantId": 9,
+  "propertyId": 11,
+  "unitNumber": "1B",
+  "startDate": "2026-11-01",
+  "endDate": "2027-10-31",
+  "durationType": "annual",
+  "expectedRent": 1000
+}
+```
+
+**Response `201`** – `message: "lease created"`, `data` is a [lease detail](#lease-object).
+
+**Errors**
+
+| Status | `message` | When |
+|---|---|---|
+| 400 | `invalid request` | Body fails validation |
+| 400 | `lease end date must be after start date` | |
+| 400 | `minimum partial amount cannot exceed the lease's expected rent` | |
+| 403 | `invalid credentials` | Caller is a tenant |
+| 404 | `tenant not found` | Tenant doesn't exist or isn't on a property the caller can access |
+| 404 | `property not found` | |
+| 404 | `unit not found` | |
+| 409 | `property is archived` | |
+| 409 | `unit already has an active lease` | |
+| 409 | `tenant already has an active lease` | |
+| 500 | `something went wrong` | |
+
+---
+
+### `PATCH /leases/{id}`
+
+Update a lease, or end or terminate it. Only fields sent are changed; all changes are applied in one transaction. **Auth:** owner or manager of the lease's property.
+
+**Request body** – all optional.
+
+| Field | Type | Rules |
+|---|---|---|
+| `allowPartialPayment` | boolean | Any status |
+| `minimumPartialAmount` | number | Any status; ≥ 0 and ≤ `expectedRent` |
+| `endDate` | string | Active leases only; `YYYY-MM-DD`, after `startDate`. A past date is allowed – the daily job then ends the lease |
+| `expectedRent` | number | Active leases only; > 0 and ≥ `amountPaid`; not allowed while any installment still has money owed. `outstandingRent` becomes `expectedRent − amountPaid`, and the tenant's rent fields are updated if this is their current lease |
+| `status` | string | Active leases only; `ended` or `terminated`. Sets `endedAt` and frees the unit; the balance stays owed |
+
+```json
+{ "status": "terminated" }
+```
+
+**Response `200`** – `message: "lease updated"`, `data` is the updated [lease detail](#lease-object).
+
+**Errors**
+
+| Status | `message` | When |
+|---|---|---|
+| 400 | `invalid request` | `id` or body fails validation (including a `status` other than `ended`/`terminated`) |
+| 400 | `lease end date must be after start date` | |
+| 400 | `expected rent cannot be less than the amount already paid (<n>)` | |
+| 400 | `minimum partial amount cannot exceed the lease's expected rent` | |
+| 403 | `invalid credentials` | Caller is a tenant |
+| 404 | `lease not found` | |
+| 409 | `lease is not active` | `endDate`, `expectedRent` or `status` on an ended or terminated lease |
+| 409 | `lease has unpaid installments` | `expectedRent` while installments are still owed |
+| 500 | `something went wrong` | |
+
+---
+
+### `GET /leases/{id}/installments`
+
+The lease's full installment schedule, in due-date order (not paginated). **Auth:** the lease's tenant, or the owner/manager of its property.
+
+**Response `200`** – `data` is an array of [Installment](#installment-object).
+
+**Errors**
+
+| Status | `message` | When |
+|---|---|---|
+| 400 | `invalid request` | `id` is not a positive integer |
+| 404 | `lease not found` | |
+| 500 | `something went wrong` | |
+
+---
+
+### `POST /leases/{id}/installments`
+
+Set the lease's installment schedule. Replaces the installments that have received no money; installments that have been partly or fully paid are kept. The new items plus the outstanding amounts of kept installments must add up **exactly** to the lease's outstanding rent. **Auth:** owner or manager of the lease's property.
+
+**Request body**
+
+| Field | Type | Required | Rules |
+|---|---|---|---|
+| `items` | array | yes | At least one `{ amount: number > 0, dueDate: "YYYY-MM-DD" }` |
+
+```json
+{
+  "items": [
+    { "amount": 400, "dueDate": "2026-10-15" },
+    { "amount": 400, "dueDate": "2026-12-01" },
+    { "amount": 400, "dueDate": "2027-01-01" }
+  ]
+}
+```
+
+**Response `201`** – `message: "installments set"`, `data` is the lease's full schedule as an array of [Installment](#installment-object).
+
+**Errors**
+
+| Status | `message` | When |
+|---|---|---|
+| 400 | `invalid request` | `id` or body fails validation |
+| 400 | `installments must add up to the lease's outstanding rent of <n>` | |
+| 403 | `invalid credentials` | Caller is a tenant |
+| 404 | `lease not found` | |
+| 409 | `lease is not active` | |
+| 500 | `something went wrong` | |
+
+---
+
+### `GET /leases/installments`
+
+List installments across leases, ordered by due date – for example upcoming or overdue payments. **Auth:** any role; scoped like leases.
 
 **Query parameters** – all optional.
 
@@ -1429,44 +1667,7 @@ List installments, ordered by due date. **Auth:** any role; scoped like payments
 
 ---
 
-### `POST /payments/installments`
-
-Set a lease's installment schedule. Replaces the lease's installments that have received no money; installments that have been partly or fully paid are kept. The new items plus the outstanding amounts of kept installments must add up **exactly** to the lease's outstanding rent. **Auth:** owner or manager of the lease's property.
-
-**Request body**
-
-| Field | Type | Required | Rules |
-|---|---|---|---|
-| `leaseId` | integer | yes | Active lease the caller can access |
-| `items` | array | yes | At least one `{ amount: number > 0, dueDate: "YYYY-MM-DD" }` |
-
-```json
-{
-  "leaseId": 4,
-  "items": [
-    { "amount": 400, "dueDate": "2026-10-15" },
-    { "amount": 400, "dueDate": "2026-12-01" },
-    { "amount": 400, "dueDate": "2027-01-01" }
-  ]
-}
-```
-
-**Response `201`** – `message: "installments set"`, `data` is the lease's full schedule as an array of [Installment](#installment-object), in due-date order.
-
-**Errors**
-
-| Status | `message` | When |
-|---|---|---|
-| 400 | `invalid request` | Body fails validation |
-| 400 | `installments must add up to the lease's outstanding rent of <n>` | |
-| 403 | `invalid credentials` | Caller is a tenant |
-| 404 | `lease not found` | |
-| 409 | `lease is not active` | |
-| 500 | `something went wrong` | |
-
----
-
-### `PATCH /payments/installments/{id}`
+### `PATCH /leases/installments/{id}`
 
 Change an installment's due date. Amounts can only change by setting a new schedule, so the total stays equal to the lease's outstanding rent. **Auth:** owner or manager of the property.
 
@@ -1489,29 +1690,8 @@ Change an installment's due date. Amounts can only change by setting a new sched
 
 ---
 
-### `PATCH /payments/leases/{id}`
+### `POST /leases/expiry/run`
 
-Set whether the tenant may make partial payments, and the minimum. Only fields sent are changed. **Auth:** owner or manager of the lease's property.
+**Development only** (registered when `APP_ENV=development`; no token required). Runs the daily expiry job immediately.
 
-**Request body** – all optional.
-
-| Field | Type | Rules |
-|---|---|---|
-| `allowPartialPayment` | boolean | |
-| `minimumPartialAmount` | number | ≥ 0 and ≤ the lease's `expectedRent` |
-
-```json
-{ "allowPartialPayment": true, "minimumPartialAmount": 100 }
-```
-
-**Response `200`** – `message: "lease updated"`, `data` is the [Lease](#lease-object).
-
-**Errors**
-
-| Status | `message` | When |
-|---|---|---|
-| 400 | `invalid request` | `id` or body fails validation |
-| 400 | `minimum partial amount cannot exceed the lease's expected rent` | |
-| 403 | `invalid credentials` | Caller is a tenant |
-| 404 | `lease not found` | |
-| 500 | `something went wrong` | |
+**Response `200`** – `message: "expiry job ran"`, `data` is `{ "ended": <number of leases ended> }`.

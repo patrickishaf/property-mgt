@@ -19,7 +19,6 @@ import (
 
 const (
 	errInvalidInstallment = "invalid installment"
-	errLeaseNotActive     = "lease is not active"
 	errLeaseNotFound      = "lease not found"
 	errNotFound           = "payment not found"
 )
@@ -281,9 +280,6 @@ func (this *service) createPayment(actor *common.Actor, dto createPaymentReq) co
 	lease, property, errRes := this.findAdminLease(actor, dto.LeaseID, logger)
 	if errRes != nil {
 		return *errRes
-	}
-	if lease.Status != model.LeaseStatusActive {
-		return common.ServiceResponse{StatusCode: 409, Err: errLeaseNotActive}
 	}
 	reference := dto.Reference
 	if reference == "" {

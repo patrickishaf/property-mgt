@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"time"
 
 	"github.com/patrickishaf/property-mgt/common"
 	"github.com/patrickishaf/property-mgt/internal/db/model"
@@ -173,4 +174,77 @@ func (this *LeaseRepository) PortfolioTotals(ownerID uint, managerID uint, prope
 			"COALESCE(SUM(outstanding_rent), 0) AS outstanding",
 	).Scan(&totals).Error
 	return totals, err
+}
+
+// LeaseFilter narrows a lease listing. Zero values are ignored. OwnerID and
+// ManagerID scope results to that admin's properties.
+type LeaseFilter struct {
+	EndingBefore *time.Time
+	HasBalance   *bool
+	ManagerID    uint
+	OwnerID      uint
+	PropertyID   uint
+	Status       string
+	TenantID     uint
+	UnitNumber   string
+}
+
+func (this *LeaseRepository) FindMany(filter LeaseFilter, page int, limit int) ([]model.Lease, int64, error) {
+	query := scopeToProperties(this.db, this.db.Model(&model.Lease{}), filter.OwnerID, filter.ManagerID)
+	if filter.PropertyID != 0 {
+		query = query.Where("property_id = ?", filter.PropertyID)
+	}
+	if filter.TenantID != 0 {
+		query = query.Where("tenant_id = ?", filter.TenantID)
+	}
+	if filter.UnitNumber != "" {
+		query = query.Where("unit_number = ?", filter.UnitNumber)
+	}
+	if filter.Status != "" {
+		query = query.Where("status = ?", filter.Status)
+	}
+	if filter.EndingBefore != nil {
+		query = query.Where("end_date < ?", *filter.EndingBefore)
+	}
+	if filter.HasBalance != nil {
+		if *filter.HasBalance {
+			query = query.Where("outstanding_rent > 0")
+		} else {
+			query = query.Where("outstanding_rent <= 0")
+		}
+	}
+	query = query.Session(&gorm.Session{})
+
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var leases []model.Lease
+	err := query.Order("id DESC").Offset((page - 1) * limit).Limit(limit).Find(&leases).Error
+	if err != nil {
+		return nil, 0, err
+	}
+	return leases, total, nil
+}
+
+// FindActiveEndingBefore returns the IDs of active leases whose end date is before the given time.
+func (this *LeaseRepository) FindActiveEndingBefore(before time.Time) ([]uint, error) {
+	var ids []uint
+	err := this.db.Model(&model.Lease{}).
+		Where("status = ? AND end_date < ?", model.LeaseStatusActive, before).
+		Order("id ASC").Pluck("id", &ids).Error
+	return ids, err
+}
+
+// FindLatestWithBalanceByTenant returns the tenant's most recent lease that still has rent owed.
+func (this *LeaseRepository) FindLatestWithBalanceByTenant(tenantID uint) (*model.Lease, error) {
+	var l model.Lease
+	err := this.db.Where("tenant_id = ? AND outstanding_rent > 0", tenantID).Order("id DESC").First(&l).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &l, nil
 }

@@ -1,4 +1,4 @@
-package payment
+package lease
 
 import (
 	"errors"
@@ -17,11 +17,19 @@ type scheduleMismatchError struct {
 }
 
 func (this scheduleMismatchError) Error() string {
-	return "installments must add up to the lease's outstanding rent of " + describeOutstanding(this.expected)
+	return "installments must add up to the lease's outstanding rent of " + describeAmount(this.expected)
+}
+
+func toInstallmentList(installments []model.Installment, now time.Time) []installmentRes {
+	items := make([]installmentRes, 0, len(installments))
+	for _, i := range installments {
+		items = append(items, toInstallmentRes(i, now))
+	}
+	return items
 }
 
 func (this *service) getInstallments(actor *common.Actor, dto getInstallmentsReq) common.ServiceResponse {
-	logger := this.logger.With("caller", "payment.service.getInstallments", "actor", actor.Email)
+	logger := this.logger.With("caller", "lease.service.getInstallments", "actor", actor.Email)
 	filter := repository.InstallmentFilter{
 		DueBefore:  parseDate(dto.DueBefore),
 		LeaseID:    dto.LeaseID,
@@ -45,19 +53,34 @@ func (this *service) getInstallments(actor *common.Actor, dto getInstallmentsReq
 		logger.Error("failed to find installments", "err", err.Error())
 		return serverError()
 	}
-	items := make([]installmentRes, 0, len(installments))
-	for _, i := range installments {
-		items = append(items, toInstallmentRes(i, now))
-	}
-	return common.ServiceResponse{StatusCode: 200, Data: listRes[installmentRes]{Items: items, Limit: limit, Page: page, Total: total}}
+	return common.ServiceResponse{StatusCode: 200, Data: listRes[installmentRes]{
+		Items: toInstallmentList(installments, now),
+		Limit: limit,
+		Page:  page,
+		Total: total,
+	}}
 }
 
-// setInstallments replaces the lease's unpaid installments with a new schedule.
-// Installments that have received money are kept; the new items plus what is
-// still owed on the kept ones must equal the lease's outstanding rent.
-func (this *service) setInstallments(actor *common.Actor, dto setInstallmentsReq) common.ServiceResponse {
-	logger := this.logger.With("caller", "payment.service.setInstallments", "actor", actor.Email)
-	lease, _, errRes := this.findAdminLease(actor, dto.LeaseID, logger)
+func (this *service) getLeaseInstallments(actor *common.Actor, leaseID uint) common.ServiceResponse {
+	logger := this.logger.With("caller", "lease.service.getLeaseInstallments", "actor", actor.Email)
+	lease, errRes := this.findVisibleLease(actor, leaseID, logger)
+	if errRes != nil {
+		return *errRes
+	}
+	installments, err := this.installmentRepo.FindByLease(lease.ID)
+	if err != nil {
+		logger.Error("failed to find installments", "err", err.Error())
+		return serverError()
+	}
+	return common.ServiceResponse{StatusCode: 200, Data: toInstallmentList(installments, time.Now())}
+}
+
+// createLeaseInstallment replaces the lease's unpaid installments with a new
+// schedule. Installments that have received money are kept; the new items plus
+// what is still owed on the kept ones must equal the lease's outstanding rent.
+func (this *service) createLeaseInstallment(actor *common.Actor, leaseID uint, dto setInstallmentsReq) common.ServiceResponse {
+	logger := this.logger.With("caller", "lease.service.createLeaseInstallment", "actor", actor.Email)
+	lease, errRes := this.findAdminLease(actor, leaseID, logger)
 	if errRes != nil {
 		return *errRes
 	}
@@ -117,16 +140,11 @@ func (this *service) setInstallments(actor *common.Actor, dto setInstallmentsReq
 		logger.Error("failed to find installments", "err", err.Error())
 		return serverError()
 	}
-	now := time.Now()
-	items := make([]installmentRes, 0, len(installments))
-	for _, i := range installments {
-		items = append(items, toInstallmentRes(i, now))
-	}
-	return common.ServiceResponse{StatusCode: 201, Data: items}
+	return common.ServiceResponse{StatusCode: 201, Data: toInstallmentList(installments, time.Now())}
 }
 
 func (this *service) updateInstallment(actor *common.Actor, id uint, dto updateInstallmentReq) common.ServiceResponse {
-	logger := this.logger.With("caller", "payment.service.updateInstallment", "actor", actor.Email)
+	logger := this.logger.With("caller", "lease.service.updateInstallment", "actor", actor.Email)
 	if !isAdmin(actor) {
 		return forbidden()
 	}
@@ -138,12 +156,12 @@ func (this *service) updateInstallment(actor *common.Actor, id uint, dto updateI
 	if installment == nil {
 		return common.ServiceResponse{StatusCode: 404, Err: errInstallmentNotFound}
 	}
-	ok, err := this.canSeeRecord(actor, installment.TenantID, installment.PropertyID)
+	property, err := this.propertyRepo.FindOneById(uint(installment.PropertyID))
 	if err != nil {
-		logger.Error("failed to check installment access", "err", err.Error())
+		logger.Error("failed to find property", "err", err.Error())
 		return serverError()
 	}
-	if !ok {
+	if !property.AccessibleBy(actor) {
 		return common.ServiceResponse{StatusCode: 404, Err: errInstallmentNotFound}
 	}
 
@@ -154,33 +172,4 @@ func (this *service) updateInstallment(actor *common.Actor, id uint, dto updateI
 	}
 	installment.DueDate = &dueDate
 	return common.ServiceResponse{StatusCode: 200, Data: toInstallmentRes(*installment, time.Now())}
-}
-
-func (this *service) updateLease(actor *common.Actor, id uint, dto updateLeaseReq) common.ServiceResponse {
-	logger := this.logger.With("caller", "payment.service.updateLease", "actor", actor.Email)
-	lease, _, errRes := this.findAdminLease(actor, id, logger)
-	if errRes != nil {
-		return *errRes
-	}
-
-	fields := map[string]any{}
-	if dto.AllowPartialPayment != nil {
-		fields["allow_partial_payment"] = *dto.AllowPartialPayment
-		lease.AllowPartialPayment = *dto.AllowPartialPayment
-	}
-	if dto.MinimumPartialAmount != nil {
-		minimum := round2(*dto.MinimumPartialAmount)
-		if minimum > round2(lease.ExpectedRent) {
-			return common.ServiceResponse{StatusCode: 400, Err: "minimum partial amount cannot exceed the lease's expected rent"}
-		}
-		fields["minimum_partial_amount"] = minimum
-		lease.MinimumPartialAmount = minimum
-	}
-	if len(fields) > 0 {
-		if err := this.leaseRepo.Update(lease.ID, fields); err != nil {
-			logger.Error("failed to update lease", "err", err.Error())
-			return serverError()
-		}
-	}
-	return common.ServiceResponse{StatusCode: 200, Data: toLeaseRes(*lease)}
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/patrickishaf/property-mgt/internal/net"
 	"github.com/patrickishaf/property-mgt/pkg/apidocs"
 	"github.com/patrickishaf/property-mgt/pkg/auth"
+	"github.com/patrickishaf/property-mgt/pkg/lease"
 	"github.com/patrickishaf/property-mgt/pkg/maintenance"
 	"github.com/patrickishaf/property-mgt/pkg/messaging"
 	"github.com/patrickishaf/property-mgt/pkg/payment"
@@ -49,6 +50,8 @@ func main() {
 
 	// services
 	authService := auth.CreateService(&cfg.App, logger, adminRepo, tenantRepo)
+	leaseService := lease.CreateService(&cfg.App, logger, dbConn, leaseRepo, installmentRepo, tenantRepo, propertyRepo, unitRepo)
+	leaseService.RegisterExpiryJob(scheduler)
 	maintenanceService := maintenance.CreateService()
 	messagingService := messaging.CreateService()
 	paymentService := payment.CreateService(&cfg.App, logger, dbConn, paymentRepo, installmentRepo, leaseRepo, propertyRepo, tenantRepo, bachsClient)
@@ -58,6 +61,7 @@ func main() {
 
 	// http handlers
 	authHTTPHandler := auth.CreateHTTPHandler(authService)
+	leaseHTTPHandler := lease.CreateHTTPHandler(leaseService)
 	maintenanceHTTPHandler := maintenance.CreateHTTPHandler(maintenanceService)
 	messagingHTTPHandler := messaging.CreateHTTPHandler(messagingService)
 	paymentHTTPHandler := payment.CreateHTTPHandler(paymentService)
@@ -67,6 +71,7 @@ func main() {
 
 	// routers
 	authRouter := auth.CreateRouter(&cfg.App, authHTTPHandler, "/auth")
+	leaseRouter := lease.CreateRouter(&cfg.App, leaseHTTPHandler, "/leases")
 	maintenanceRouter := maintenance.CreateRouter(maintenanceHTTPHandler, "/maintenance")
 	messagingRouter := messaging.CreateRouter(messagingHTTPHandler, "/messages")
 	paymentRouter := payment.CreateRouter(&cfg.App, paymentHTTPHandler, "/payments")
@@ -80,6 +85,7 @@ func main() {
 	})
 	srv.ConfigureRoutes("", []common.AppRouter{
 		authRouter,
+		leaseRouter,
 		maintenanceRouter,
 		messagingRouter,
 		paymentRouter,

@@ -11,18 +11,39 @@ import (
 	"gorm.io/gorm"
 )
 
+// checkoutLease picks the lease a tenant checkout pays for: the requested lease
+// if it is theirs, otherwise their active lease, otherwise their most recent
+// lease that still has rent owed.
+func (this *service) checkoutLease(tenantID uint, leaseID uint) (*model.Lease, error) {
+	if leaseID != 0 {
+		lease, err := this.leaseRepo.FindOneById(leaseID)
+		if err != nil || lease == nil || uint(lease.TenantID) != tenantID {
+			return nil, err
+		}
+		return lease, nil
+	}
+	lease, err := this.leaseRepo.FindActiveByTenant(tenantID)
+	if err != nil || lease != nil {
+		return lease, err
+	}
+	return this.leaseRepo.FindLatestWithBalanceByTenant(tenantID)
+}
+
 func (this *service) initiateCheckout(actor *common.Actor, dto initiateCheckoutReq) common.ServiceResponse {
 	logger := this.logger.With("caller", "payment.service.initiateCheckout", "actor", actor.Email)
 	if actor.Role != common.ActorRoleTenant {
 		return forbidden()
 	}
-	lease, err := this.leaseRepo.FindActiveByTenant(actor.ID)
+	lease, err := this.checkoutLease(actor.ID, dto.LeaseID)
 	if err != nil {
-		logger.Error("failed to find active lease", "err", err.Error())
+		logger.Error("failed to find lease for checkout", "err", err.Error())
 		return serverError()
 	}
 	if lease == nil {
-		return common.ServiceResponse{StatusCode: 404, Err: "no active lease"}
+		if dto.LeaseID != 0 {
+			return common.ServiceResponse{StatusCode: 404, Err: errLeaseNotFound}
+		}
+		return common.ServiceResponse{StatusCode: 404, Err: "no lease with an outstanding balance"}
 	}
 	outstanding := round2(lease.OutstandingRent)
 	if outstanding <= 0 {
