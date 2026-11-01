@@ -45,13 +45,15 @@ type getPaymentsReq struct {
 	PropertyID uint   `form:"propertyId"`
 	Purpose    string `form:"purpose" binding:"omitempty,oneof=lease installments partial"`
 	Source     string `form:"source" binding:"omitempty,oneof=offline checkout"`
-	Status     string `form:"status" binding:"omitempty,oneof=unpaid partially_paid paid failed expired"`
-	TenantID   uint   `form:"tenantId"`
-	To         string `form:"to" binding:"omitempty,datetime=2006-01-02"`
+	// Status is one status or a comma-separated list, e.g. "paid,partially_paid".
+	Status   string `form:"status"`
+	TenantID uint   `form:"tenantId"`
+	To       string `form:"to" binding:"omitempty,datetime=2006-01-02"`
 }
 
 type getStatsReq struct {
 	PropertyID uint `form:"propertyId"`
+	Year       int  `form:"year" binding:"omitempty,min=2000,max=2100"`
 }
 
 type initiateCheckoutReq struct {

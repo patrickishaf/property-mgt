@@ -13,6 +13,7 @@ Human-readable reference for the HTTP API. The machine-readable contract is [`op
   - [Response envelope](#response-envelope)
   - [Status codes](#status-codes)
   - [Pagination](#pagination)
+- [Overview page](#overview-page)
 - [Auth](#auth)
   - [`POST /auth/accounts`](#post-authaccounts) – create owner account
   - [`POST /auth/login`](#post-authlogin) – log in with password
@@ -59,6 +60,7 @@ Human-readable reference for the HTTP API. The machine-readable contract is [`op
   - [Lease lifecycle](#lease-lifecycle)
   - [Objects](#lease-object)
   - [`GET /leases`](#get-leases) – list leases
+  - [`GET /leases/due`](#get-leasesdue) – upcoming and overdue rent
   - [`GET /leases/{id}`](#get-leasesid) – get lease
   - [`POST /leases`](#post-leases) – new lease for an existing tenant
   - [`PATCH /leases/{id}`](#patch-leasesid) – update, end or terminate a lease
@@ -176,6 +178,21 @@ List endpoints accept `page` (default `1`, min `1`) and `limit` (default `20`, m
   "total": 0
 }
 ```
+
+---
+
+## Overview page
+
+The web client's Overview page (shown after login) uses four calls:
+
+| Section | Call |
+|---|---|
+| Welcome name | `GET /auth/user` |
+| KPI cards (rent expected, collected, outstanding, overdue) | `GET /payments/stats?year=<year>&propertyId=<optional>` |
+| Upcoming & overdue list, "Due dates" count | `GET /leases/due?limit=4&propertyId=<optional>` – the count is `total` |
+| Recent payments | `GET /payments?status=paid,partially_paid&limit=5&propertyId=<optional>` |
+
+**Due items.** Rent falls due as either an **installment** (on its due date) or, for a lease **without installments**, the whole lease (on its start date). Leases of any status count – ended and terminated leases still owe their balance. A due item is **overdue** when its due date has passed and money is still owed.
 
 ---
 
@@ -1265,7 +1282,7 @@ List payments, newest first. **Auth:** any role; owners and managers see payment
 | `propertyId` | integer | |
 | `tenantId` | integer | Ignored for tenants (always themselves) |
 | `leaseId` | integer | |
-| `status` | string | `unpaid`, `partially_paid`, `paid`, `failed`, `expired` |
+| `status` | string | One status or a comma-separated list, e.g. `paid,partially_paid` for money received. Values: `unpaid`, `partially_paid`, `paid`, `failed`, `expired` |
 | `source` | string | `offline` or `checkout` |
 | `purpose` | string | `lease`, `installments` or `partial` |
 | `method` | string | e.g. `cash`, `checkout` |
@@ -1303,9 +1320,14 @@ Get one payment with its allocations and receipt. **Auth:** the payment's tenant
 
 ### `GET /payments/stats`
 
-Rent totals across the caller's properties, for the dashboard. Calculated from active leases and installments. **Auth:** owner or manager.
+Rent figures for a year across the caller's properties – the Overview page's KPI cards. Based on [due items](#overview-page) falling due in the year. **Auth:** owner or manager.
 
-**Query parameters:** `propertyId` (optional) – limit to one property the caller can access.
+**Query parameters** – all optional.
+
+| Param | Type | Rules |
+|---|---|---|
+| `year` | integer | 2000–2100; defaults to the current year (UTC) |
+| `propertyId` | integer | Limit to one property the caller can access |
 
 **Response `200`**
 
@@ -1314,27 +1336,29 @@ Rent totals across the caller's properties, for the dashboard. Calculated from a
   "status": "success",
   "message": "",
   "data": {
-    "activeTenantCount": 1,
-    "openInstallmentCount": 3,
-    "outstandingRentBalance": 1200,
-    "overdueInstallmentCount": 1,
-    "percentageRentCollected": 0,
-    "totalOverdueAmount": 400,
-    "totalRentCollected": 0,
-    "totalRentExpected": 1200
+    "activeTenantCount": 3,
+    "openInstallmentCount": 4,
+    "outstandingRentBalance": 2500,
+    "overdueInstallmentCount": 2,
+    "percentageRentCollected": 3.85,
+    "totalOverdueAmount": 1300,
+    "totalRentCollected": 100,
+    "totalRentExpected": 2600
   }
 }
 ```
 
 | Field | Description |
 |---|---|
-| `totalRentExpected` | Sum of `expectedRent` over active leases |
-| `totalRentCollected` | Sum of `amountPaid` over active leases |
+| `totalRentExpected` | Total of due items falling due in the year (installment amounts by due date; full rent of leases without installments by start date) |
+| `totalRentCollected` | Payments received in the year (status `paid` or `partially_paid`, by `paidAt`) |
 | `percentageRentCollected` | `totalRentCollected / totalRentExpected × 100`, 2 decimals; `0` when nothing is expected |
-| `outstandingRentBalance` | Sum of `outstandingRent` over active leases |
-| `activeTenantCount` | Tenants with an active lease |
-| `openInstallmentCount` | Installments with money still owed |
-| `overdueInstallmentCount`, `totalOverdueAmount` | Open installments past their due date, and what's owed on them |
+| `outstandingRentBalance` | `totalRentExpected − totalRentCollected`, never below `0` |
+| `openInstallmentCount` | Due items in the year that still owe money (installments and leases without installments) |
+| `overdueInstallmentCount`, `totalOverdueAmount` | Due items in the year that are overdue, and what's still owed on them |
+| `activeTenantCount` | Tenants with an active lease (not affected by `year`) |
+
+> Collected counts money **received** in the year, which can include payments toward rent due in another year; outstanding is therefore a year-level figure and may differ from the sum of the due list.
 
 **Errors**
 
@@ -1474,6 +1498,67 @@ List leases, newest first. **Auth:** any role; owners and managers see leases on
 | `limit` | integer | **default `10`**, min `1`, max `100` |
 
 **Response `200`** – `data` is a [paginated](#pagination) list of [Lease](#lease-object).
+
+**Errors**
+
+| Status | `message` | When |
+|---|---|---|
+| 400 | `invalid request` | Query fails validation |
+| 500 | `something went wrong` | |
+
+---
+
+### `GET /leases/due`
+
+Rent still owed, as [due items](#overview-page): installments with money owed, plus leases without installments that still owe rent. Sorted by due date, so overdue items come first. **Auth:** any role; owners and managers see their properties, tenants see their own.
+
+**Query parameters** – all optional.
+
+| Param | Type | Rules |
+|---|---|---|
+| `propertyId` | integer | |
+| `status` | string | `overdue` or `upcoming` |
+| `page` | integer | default `1` |
+| `limit` | integer | default `10`, max `100` |
+
+**Response `200`** – `data` is a [paginated](#pagination) list; `total` is the number of open due items.
+
+```json
+{
+  "status": "success",
+  "message": "",
+  "data": {
+    "items": [
+      {
+        "type": "lease",
+        "installmentId": null,
+        "leaseId": 21,
+        "tenantId": 18,
+        "tenantFullName": "Chika Okafor",
+        "propertyId": 14,
+        "propertyName": "Parkview Residences",
+        "unitNumber": "A-01",
+        "amount": 300000,
+        "dueDate": "2026-10-10",
+        "overdue": true
+      }
+    ],
+    "page": 1,
+    "limit": 4,
+    "total": 12
+  }
+}
+```
+
+| Field | Description |
+|---|---|
+| `type` | `installment` or `lease` (a lease without installments) |
+| `installmentId` | Set for installments; `null` for leases |
+| `leaseId`, `tenantId`, `propertyId` | |
+| `tenantFullName`, `propertyName`, `unitNumber` | |
+| `amount` | What is still owed |
+| `dueDate` | `YYYY-MM-DD` – the installment's due date, or the lease's start date |
+| `overdue` | The due date has passed and money is still owed |
 
 **Errors**
 

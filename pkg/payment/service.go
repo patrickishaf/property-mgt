@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -391,6 +392,33 @@ func parseDate(value string) *time.Time {
 	return &t
 }
 
+var paymentStatuses = map[string]bool{
+	model.PaymentStatusExpired:       true,
+	model.PaymentStatusFailed:        true,
+	model.PaymentStatusPaid:          true,
+	model.PaymentStatusPartiallyPaid: true,
+	model.PaymentStatusUnpaid:        true,
+}
+
+// parseStatuses splits a comma-separated status filter, dropping blanks and
+// duplicates. ok is false if any value isn't a payment status.
+func parseStatuses(value string) ([]string, bool) {
+	var statuses []string
+	seen := make(map[string]bool)
+	for _, part := range strings.Split(value, ",") {
+		status := strings.TrimSpace(part)
+		if status == "" || seen[status] {
+			continue
+		}
+		if !paymentStatuses[status] {
+			return nil, false
+		}
+		seen[status] = true
+		statuses = append(statuses, status)
+	}
+	return statuses, true
+}
+
 func (this *service) getPayments(actor *common.Actor, dto getPaymentsReq) common.ServiceResponse {
 	logger := this.logger.With("caller", "payment.service.getPayments", "actor", actor.Email)
 	filter := repository.PaymentFilter{
@@ -400,9 +428,13 @@ func (this *service) getPayments(actor *common.Actor, dto getPaymentsReq) common
 		PropertyID: dto.PropertyID,
 		Purpose:    dto.Purpose,
 		Source:     dto.Source,
-		Status:     dto.Status,
 		TenantID:   dto.TenantID,
 	}
+	statuses, ok := parseStatuses(dto.Status)
+	if !ok {
+		return common.ServiceResponse{StatusCode: 400, Err: common.ErrInvalidRequest}
+	}
+	filter.Statuses = statuses
 	if to := parseDate(dto.To); to != nil {
 		end := to.AddDate(0, 0, 1)
 		filter.To = &end
@@ -456,6 +488,37 @@ func (this *service) getPaymentInfo(actor *common.Actor, id uint) common.Service
 	return this.paymentDetail(payment, 200, logger)
 }
 
+// yearBounds returns [start, end) for the year in UTC; a zero year means the
+// year containing now.
+func yearBounds(year int, now time.Time) (time.Time, time.Time) {
+	if year == 0 {
+		year = now.UTC().Year()
+	}
+	start := time.Date(year, time.January, 1, 0, 0, 0, 0, time.UTC)
+	return start, start.AddDate(1, 0, 0)
+}
+
+// portfolioFromTotals combines rent due in a year (installments plus leases
+// without installments) with the money received that year.
+func portfolioFromTotals(installments repository.DueTotals, leases repository.DueTotals, collected float64, activeTenants int64) portfolioRes {
+	expected := round2(installments.Expected + leases.Expected)
+	collected = round2(collected)
+	percentage := 0.0
+	if expected > 0 {
+		percentage = round2(collected / expected * 100)
+	}
+	return portfolioRes{
+		ActiveTenantCount:       activeTenants,
+		OpenInstallmentCount:    installments.OpenCount + leases.OpenCount,
+		OutstandingRentBalance:  math.Max(round2(expected-collected), 0),
+		OverdueInstallmentCount: installments.OverdueCount + leases.OverdueCount,
+		PercentageRentCollected: percentage,
+		TotalOverdueAmount:      round2(installments.OverdueAmount + leases.OverdueAmount),
+		TotalRentCollected:      collected,
+		TotalRentExpected:       expected,
+	}
+}
+
 func (this *service) getTotalPaymentStats(actor *common.Actor, dto getStatsReq) common.ServiceResponse {
 	logger := this.logger.With("caller", "payment.service.getTotalPaymentStats", "actor", actor.Email)
 	if !isAdmin(actor) {
@@ -473,30 +536,29 @@ func (this *service) getTotalPaymentStats(actor *common.Actor, dto getStatsReq) 
 		}
 	}
 
-	totals, err := this.leaseRepo.PortfolioTotals(ownerID, managerID, dto.PropertyID)
+	now := time.Now()
+	start, end := yearBounds(dto.Year, now)
+	installments, err := this.installmentRepo.YearTotals(ownerID, managerID, dto.PropertyID, start, end, now)
 	if err != nil {
-		logger.Error("failed to sum lease totals", "err", err.Error())
+		logger.Error("failed to sum installments due", "err", err.Error())
 		return serverError()
 	}
-	instStats, err := this.installmentRepo.Stats(ownerID, managerID, dto.PropertyID, time.Now())
+	leases, err := this.leaseRepo.UnscheduledYearTotals(ownerID, managerID, dto.PropertyID, start, end, now)
 	if err != nil {
-		logger.Error("failed to compute installment stats", "err", err.Error())
+		logger.Error("failed to sum unscheduled leases due", "err", err.Error())
 		return serverError()
 	}
-	percentage := 0.0
-	if totals.Expected > 0 {
-		percentage = round2(totals.Collected / totals.Expected * 100)
+	collected, err := this.paymentRepo.SumReceived(ownerID, managerID, dto.PropertyID, start, end)
+	if err != nil {
+		logger.Error("failed to sum payments received", "err", err.Error())
+		return serverError()
 	}
-	return common.ServiceResponse{StatusCode: 200, Data: portfolioRes{
-		ActiveTenantCount:       totals.ActiveTenantCount,
-		OpenInstallmentCount:    instStats.OpenCount,
-		OutstandingRentBalance:  round2(totals.Outstanding),
-		OverdueInstallmentCount: instStats.OverdueCount,
-		PercentageRentCollected: percentage,
-		TotalOverdueAmount:      round2(instStats.OverdueAmount),
-		TotalRentCollected:      round2(totals.Collected),
-		TotalRentExpected:       round2(totals.Expected),
-	}}
+	activeTenants, err := this.leaseRepo.ActiveTenantCount(ownerID, managerID, dto.PropertyID)
+	if err != nil {
+		logger.Error("failed to count active tenants", "err", err.Error())
+		return serverError()
+	}
+	return common.ServiceResponse{StatusCode: 200, Data: portfolioFromTotals(installments, leases, collected, activeTenants)}
 }
 
 // describeOutstanding formats a balance for error messages.

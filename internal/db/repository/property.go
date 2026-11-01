@@ -114,3 +114,12 @@ func (this *PropertyRepository) DecrementOccupiedUnitsTRX(id uint, trx *gorm.DB)
 	return trx.Model(&model.Property{}).Where("id = ? AND number_of_occupied_units > 0", id).
 		Update("number_of_occupied_units", gorm.Expr("number_of_occupied_units - 1")).Error
 }
+
+func (this *PropertyRepository) FindByIds(ids []uint) ([]model.Property, error) {
+	var rows []model.Property
+	if len(ids) == 0 {
+		return rows, nil
+	}
+	err := this.db.Where("id IN ?", ids).Find(&rows).Error
+	return rows, err
+}

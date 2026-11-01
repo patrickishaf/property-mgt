@@ -1093,9 +1093,12 @@ paths:
         - name: status
           in: query
           required: false
+          description: One status or a comma-separated list (e.g. paid,partially_paid). Values are unpaid, partially_paid, paid, failed, expired.
           schema:
             type: string
-            enum: [unpaid, partially_paid, paid, failed, expired]
+          examples:
+            received:
+              value: paid,partially_paid
         - name: source
           in: query
           required: false
@@ -1200,11 +1203,21 @@ paths:
     get:
       tags: [Payments]
       operationId: getTotalPaymentStats
-      summary: Portfolio payment totals
-      description: Owner or manager. Totals over active leases and installments on the caller's properties.
+      summary: Portfolio payment totals for a year
+      description: |
+        Owner or manager. Based on due items (installments by due date; leases without installments by start
+        date, any lease status) falling due in the year, and payments received in the year.
       security:
         - bearerAuth: []
       parameters:
+        - name: year
+          in: query
+          required: false
+          description: Defaults to the current year (UTC).
+          schema:
+            type: integer
+            minimum: 2000
+            maximum: 2100
         - name: propertyId
           in: query
           required: false
@@ -1455,6 +1468,57 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /leases/due:
+    get:
+      tags: [Leases]
+      operationId: getDue
+      summary: Upcoming and overdue rent
+      description: |
+        Due items still owed: installments with money owed, and leases without installments (due on their start
+        date, any status). Sorted by due date, overdue first. Owners/managers see their properties; tenants their own.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: propertyId
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [overdue, upcoming]
+        - $ref: '#/components/parameters/Page'
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+      responses:
+        '200':
+          description: A page of due items; total is the number of open due items.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/DueItemList'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '500':
           $ref: '#/components/responses/ServerError'
 
@@ -3306,20 +3370,27 @@ components:
       properties:
         activeTenantCount:
           type: integer
+          description: Tenants with an active lease (not affected by year).
         openInstallmentCount:
           type: integer
+          description: Due items in the year that still owe money (installments and leases without installments).
         outstandingRentBalance:
           type: number
+          description: totalRentExpected minus totalRentCollected, never below 0.
         overdueInstallmentCount:
           type: integer
+          description: Due items in the year that are overdue.
         percentageRentCollected:
           type: number
         totalOverdueAmount:
           type: number
+          description: Amount still owed on overdue due items in the year.
         totalRentCollected:
           type: number
+          description: Payments received (paid or partially paid) in the year.
         totalRentExpected:
           type: number
+          description: Total of due items falling due in the year.
 
     PaymentList:
       type: object
@@ -3958,3 +4029,49 @@ components:
           items:
             type: string
             enum: [in_app, sms, email]
+
+    DueItem:
+      type: object
+      required: [amount, dueDate, installmentId, leaseId, overdue, propertyId, propertyName, tenantFullName, tenantId, type, unitNumber]
+      properties:
+        type:
+          type: string
+          enum: [installment, lease]
+        installmentId:
+          type: [integer, 'null']
+        leaseId:
+          type: integer
+        tenantId:
+          type: integer
+        tenantFullName:
+          type: string
+        propertyId:
+          type: integer
+        propertyName:
+          type: string
+        unitNumber:
+          type: string
+        amount:
+          type: number
+          description: Amount still owed.
+        dueDate:
+          type: string
+          format: date
+          description: The installment's due date, or the lease's start date.
+        overdue:
+          type: boolean
+
+    DueItemList:
+      type: object
+      required: [items, page, limit, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/DueItem'
+        page:
+          type: integer
+        limit:
+          type: integer
+        total:
+          type: integer

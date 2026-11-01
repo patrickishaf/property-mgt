@@ -26,7 +26,7 @@ type PaymentFilter struct {
 	PropertyID uint
 	Purpose    string
 	Source     string
-	Status     string
+	Statuses   []string
 	TenantID   uint
 	To         *time.Time
 }
@@ -111,8 +111,11 @@ func (this *PaymentRepository) FindMany(filter PaymentFilter, page int, limit in
 	if filter.LeaseID != 0 {
 		query = query.Where("lease_id = ?", filter.LeaseID)
 	}
+	if len(filter.Statuses) > 0 {
+		query = query.Where("status IN ?", filter.Statuses)
+	}
 	for column, value := range map[string]string{
-		"status": filter.Status, "method": filter.Method, "source": filter.Source, "purpose": filter.Purpose,
+		"method": filter.Method, "source": filter.Source, "purpose": filter.Purpose,
 	} {
 		if value != "" {
 			query = query.Where(column+" = ?", value)
@@ -165,4 +168,18 @@ func (this *PaymentRepository) FindReceipt(paymentID uint) (*model.Receipt, erro
 		return nil, err
 	}
 	return &r, nil
+}
+
+// SumReceived totals payments received (paid or partially paid) in [start, end)
+// on the scoped properties.
+func (this *PaymentRepository) SumReceived(ownerID uint, managerID uint, propertyID uint, start time.Time, end time.Time) (float64, error) {
+	query := scopeToProperties(this.db, this.db.Model(&model.Payment{}), ownerID, managerID).
+		Where("status IN ? AND paid_at >= ? AND paid_at < ?",
+			[]string{model.PaymentStatusPaid, model.PaymentStatusPartiallyPaid}, start, end)
+	if propertyID != 0 {
+		query = query.Where("property_id = ?", propertyID)
+	}
+	var total float64
+	err := query.Select("COALESCE(SUM(amount), 0)").Scan(&total).Error
+	return total, err
 }

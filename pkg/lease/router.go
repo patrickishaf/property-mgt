@@ -34,6 +34,7 @@ func (this *router) RegisterRoutes(router *gin.RouterGroup) {
 	authed := router.Group("", net.VerifyJWT(this.cfg.JWTSecretKey))
 	authed.GET("", this.http.getLeases)
 	authed.POST("", this.http.createLease)
+	authed.GET("/due", this.http.getDue)
 	authed.GET("/installments", this.http.getInstallments)
 	authed.PATCH("/installments/:id", this.http.updateInstallment)
 	authed.GET("/:id", this.http.getLeaseById)

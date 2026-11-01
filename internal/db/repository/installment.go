@@ -29,8 +29,10 @@ type InstallmentFilter struct {
 
 const InstallmentFilterOverdue = "overdue"
 
-// InstallmentStats summarises open installments.
-type InstallmentStats struct {
+// DueTotals summarises rent falling due in a period: the total amount, how
+// many items still owe money, and how many of those are overdue (and by how much).
+type DueTotals struct {
+	Expected      float64
 	OpenCount     int64
 	OverdueAmount float64
 	OverdueCount  int64
@@ -125,21 +127,6 @@ func (this *InstallmentRepository) UpdateDueDate(id uint, dueDate time.Time) err
 	return this.db.Model(&model.Installment{}).Where("id = ?", id).Update("due_date", dueDate).Error
 }
 
-func (this *InstallmentRepository) Stats(ownerID uint, managerID uint, propertyID uint, now time.Time) (InstallmentStats, error) {
-	query := scopeToProperties(this.db, this.db.Model(&model.Installment{}), ownerID, managerID)
-	if propertyID != 0 {
-		query = query.Where("property_id = ?", propertyID)
-	}
-	var stats InstallmentStats
-	err := query.Select(
-		"COUNT(*) FILTER (WHERE outstanding_amount > 0) AS open_count, "+
-			"COUNT(*) FILTER (WHERE outstanding_amount > 0 AND due_date < ?) AS overdue_count, "+
-			"COALESCE(SUM(outstanding_amount) FILTER (WHERE outstanding_amount > 0 AND due_date < ?), 0) AS overdue_amount",
-		now, now,
-	).Scan(&stats).Error
-	return stats, err
-}
-
 // CountOpenByLease returns how many of the lease's installments still have money
 // owed, and how many of those are overdue.
 func (this *InstallmentRepository) CountOpenByLease(leaseID uint, now time.Time) (open int64, overdue int64, err error) {
@@ -151,4 +138,39 @@ func (this *InstallmentRepository) CountOpenByLease(leaseID uint, now time.Time)
 		Select("COUNT(*) FILTER (WHERE outstanding_amount > 0) AS open, COUNT(*) FILTER (WHERE outstanding_amount > 0 AND due_date < ?) AS overdue", now).
 		Where("lease_id = ?", leaseID).Scan(&row).Error
 	return row.Open, row.Overdue, err
+}
+
+// YearTotals sums the scoped installments due in [start, end). Overdue means
+// due before now with money still owed.
+func (this *InstallmentRepository) YearTotals(ownerID uint, managerID uint, propertyID uint, start time.Time, end time.Time, now time.Time) (DueTotals, error) {
+	query := scopeToProperties(this.db, this.db.Model(&model.Installment{}), ownerID, managerID).
+		Where("due_date >= ? AND due_date < ?", start, end)
+	if propertyID != 0 {
+		query = query.Where("property_id = ?", propertyID)
+	}
+	var totals DueTotals
+	err := query.Select(
+		"COALESCE(SUM(amount_expected), 0) AS expected, "+
+			"COUNT(*) FILTER (WHERE outstanding_amount > 0) AS open_count, "+
+			"COUNT(*) FILTER (WHERE outstanding_amount > 0 AND due_date < ?) AS overdue_count, "+
+			"COALESCE(SUM(outstanding_amount) FILTER (WHERE outstanding_amount > 0 AND due_date < ?), 0) AS overdue_amount",
+		now, now,
+	).Scan(&totals).Error
+	return totals, err
+}
+
+// FindOpen returns the scoped installments that still have money owed, in
+// due-date order. A non-zero tenantID limits them to that tenant.
+func (this *InstallmentRepository) FindOpen(ownerID uint, managerID uint, propertyID uint, tenantID uint) ([]model.Installment, error) {
+	query := scopeToProperties(this.db, this.db.Model(&model.Installment{}), ownerID, managerID).
+		Where("outstanding_amount > 0")
+	if propertyID != 0 {
+		query = query.Where("property_id = ?", propertyID)
+	}
+	if tenantID != 0 {
+		query = query.Where("tenant_id = ?", tenantID)
+	}
+	var installments []model.Installment
+	err := query.Order("due_date ASC, id ASC").Find(&installments).Error
+	return installments, err
 }

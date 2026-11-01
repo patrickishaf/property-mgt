@@ -99,3 +99,12 @@ func (this *TenantRepository) UpdateProfile(id uint, fields map[string]any) erro
 func (this *TenantRepository) UpdateTRX(id uint, fields map[string]any, trx *gorm.DB) error {
 	return trx.Model(&model.Tenant{}).Where("id = ?", id).Updates(fields).Error
 }
+
+func (this *TenantRepository) FindByIds(ids []uint) ([]model.Tenant, error) {
+	var rows []model.Tenant
+	if len(ids) == 0 {
+		return rows, nil
+	}
+	err := this.db.Where("id IN ?", ids).Find(&rows).Error
+	return rows, err
+}

@@ -162,3 +162,32 @@ func toInstallmentRes(i model.Installment, now time.Time) installmentRes {
 	}
 	return res
 }
+
+type getDueReq struct {
+	pageReq
+	PropertyID uint   `form:"propertyId"`
+	Status     string `form:"status" binding:"omitempty,oneof=overdue upcoming"`
+}
+
+const (
+	dueTypeInstallment = "installment"
+	dueTypeLease       = "lease"
+)
+
+// dueItemRes is rent still owed: an installment, or a lease without
+// installments (due on its start date).
+type dueItemRes struct {
+	Amount         float64 `json:"amount"`
+	DueDate        string  `json:"dueDate"`
+	InstallmentID  *uint   `json:"installmentId"`
+	LeaseID        uint    `json:"leaseId"`
+	Overdue        bool    `json:"overdue"`
+	PropertyID     uint    `json:"propertyId"`
+	PropertyName   string  `json:"propertyName"`
+	TenantFullName string  `json:"tenantFullName"`
+	TenantID       uint    `json:"tenantId"`
+	Type           string  `json:"type"`
+	UnitNumber     string  `json:"unitNumber"`
+
+	dueAt time.Time
+}

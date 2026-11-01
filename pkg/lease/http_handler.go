@@ -127,6 +127,15 @@ func (this *httpHandler) updateInstallment(c *gin.Context) {
 	net.Respond(c, this.svc.updateInstallment(actor, ids[0], body), "installment updated")
 }
 
+func (this *httpHandler) getDue(c *gin.Context) {
+	actor, _, ok := requestActor(c)
+	var query getDueReq
+	if !ok || !bindQuery(c, &query) {
+		return
+	}
+	net.Respond(c, this.svc.getDue(actor, query), "")
+}
+
 func (this *httpHandler) runExpiry(c *gin.Context) {
 	net.Respond(c, this.svc.runExpiry(), "expiry job ran")
 }

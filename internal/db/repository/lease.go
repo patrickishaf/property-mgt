@@ -152,30 +152,6 @@ func (this *LeaseRepository) UpdateTRX(id uint, fields map[string]any, trx *gorm
 	return trx.Model(&model.Lease{}).Where("id = ?", id).Updates(fields).Error
 }
 
-// PortfolioTotals sums rent over active leases in the scoped properties.
-type PortfolioTotals struct {
-	ActiveTenantCount int64
-	Collected         float64
-	Expected          float64
-	Outstanding       float64
-}
-
-func (this *LeaseRepository) PortfolioTotals(ownerID uint, managerID uint, propertyID uint) (PortfolioTotals, error) {
-	query := scopeToProperties(this.db, this.db.Model(&model.Lease{}), ownerID, managerID).
-		Where("status = ?", model.LeaseStatusActive)
-	if propertyID != 0 {
-		query = query.Where("property_id = ?", propertyID)
-	}
-	var totals PortfolioTotals
-	err := query.Select(
-		"COUNT(DISTINCT tenant_id) AS active_tenant_count, " +
-			"COALESCE(SUM(amount_paid), 0) AS collected, " +
-			"COALESCE(SUM(expected_rent), 0) AS expected, " +
-			"COALESCE(SUM(outstanding_rent), 0) AS outstanding",
-	).Scan(&totals).Error
-	return totals, err
-}
-
 // LeaseFilter narrows a lease listing. Zero values are ignored. OwnerID and
 // ManagerID scope results to that admin's properties.
 type LeaseFilter struct {
@@ -291,4 +267,67 @@ func (this *LeaseRepository) FindActiveTenantContacts(ownerID uint, managerID ui
 	var contacts []TenantContact
 	err := query.Order("p.name ASC, l.unit_number ASC, t.id ASC").Scan(&contacts).Error
 	return contacts, err
+}
+
+// unscheduled limits a lease query to leases without any installments.
+func unscheduled(query *gorm.DB) *gorm.DB {
+	return query.Where("NOT EXISTS (SELECT 1 FROM installments i WHERE i.lease_id = leases.id AND i.deleted_at IS NULL)")
+}
+
+// ActiveTenantCount counts tenants with an active lease on the scoped properties.
+func (this *LeaseRepository) ActiveTenantCount(ownerID uint, managerID uint, propertyID uint) (int64, error) {
+	query := scopeToProperties(this.db, this.db.Model(&model.Lease{}), ownerID, managerID).
+		Where("status = ?", model.LeaseStatusActive)
+	if propertyID != 0 {
+		query = query.Where("property_id = ?", propertyID)
+	}
+	var count int64
+	err := query.Distinct("tenant_id").Count(&count).Error
+	return count, err
+}
+
+// UnscheduledYearTotals sums leases without installments whose rent falls due
+// (on the start date) in [start, end), in any status. Overdue means the start
+// date is before now and rent is still owed.
+func (this *LeaseRepository) UnscheduledYearTotals(ownerID uint, managerID uint, propertyID uint, start time.Time, end time.Time, now time.Time) (DueTotals, error) {
+	query := unscheduled(scopeToProperties(this.db, this.db.Model(&model.Lease{}), ownerID, managerID)).
+		Where("start_date >= ? AND start_date < ?", start, end)
+	if propertyID != 0 {
+		query = query.Where("property_id = ?", propertyID)
+	}
+	var totals DueTotals
+	err := query.Select(
+		"COALESCE(SUM(expected_rent), 0) AS expected, "+
+			"COUNT(*) FILTER (WHERE outstanding_rent > 0) AS open_count, "+
+			"COUNT(*) FILTER (WHERE outstanding_rent > 0 AND start_date < ?) AS overdue_count, "+
+			"COALESCE(SUM(outstanding_rent) FILTER (WHERE outstanding_rent > 0 AND start_date < ?), 0) AS overdue_amount",
+		now, now,
+	).Scan(&totals).Error
+	return totals, err
+}
+
+// FindOpenUnscheduled returns the scoped leases without installments that still
+// have rent owed, in any status, by start date. A non-zero tenantID limits them
+// to that tenant.
+func (this *LeaseRepository) FindOpenUnscheduled(ownerID uint, managerID uint, propertyID uint, tenantID uint) ([]model.Lease, error) {
+	query := unscheduled(scopeToProperties(this.db, this.db.Model(&model.Lease{}), ownerID, managerID)).
+		Where("outstanding_rent > 0")
+	if propertyID != 0 {
+		query = query.Where("property_id = ?", propertyID)
+	}
+	if tenantID != 0 {
+		query = query.Where("tenant_id = ?", tenantID)
+	}
+	var leases []model.Lease
+	err := query.Order("start_date ASC, id ASC").Find(&leases).Error
+	return leases, err
+}
+
+func (this *LeaseRepository) FindByIds(ids []uint) ([]model.Lease, error) {
+	var leases []model.Lease
+	if len(ids) == 0 {
+		return leases, nil
+	}
+	err := this.db.Where("id IN ?", ids).Find(&leases).Error
+	return leases, err
 }
