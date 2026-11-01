@@ -18,6 +18,7 @@ Human-readable reference for the HTTP API. The machine-readable contract is [`op
   - [`POST /auth/accounts`](#post-authaccounts) – create owner account
   - [`POST /auth/login`](#post-authlogin) – log in with password
   - [`GET /auth/user`](#get-authuser) – current user
+  - [`PATCH /auth/user`](#patch-authuser) – update your own name and phone
   - [`POST /auth/token/refresh`](#post-authtokenrefresh) – new access token
   - [`POST /auth/password/set`](#post-authpasswordset) – invited tenant or manager sets password
 - [Tenants](#tenants)
@@ -90,6 +91,7 @@ Human-readable reference for the HTTP API. The machine-readable contract is [`op
   - [`GET /maintenance/issues`](#get-maintenanceissues) – list issues
   - [`GET /maintenance/issues/{id}`](#get-maintenanceissuesid) – get an issue
   - [`POST /maintenance/issues/{id}/complaints`](#post-maintenanceissuesidcomplaints) – link complaints
+  - [`DELETE /maintenance/issues/{id}/complaints/{complaintId}`](#delete-maintenanceissuesidcomplaintscomplaintid) – unlink a complaint
   - [`POST /maintenance/issues/{id}/updates`](#post-maintenanceissuesidupdates) – post an update and notify tenants
   - [`GET /maintenance/issues/{id}/updates`](#get-maintenanceissuesidupdates) – an issue's updates
 
@@ -353,6 +355,50 @@ All values are strings.
 | `email`, `firstName`, `lastName`, `phoneNumber` | Profile |
 | `expectedAnnualRent`, `outstandingAnnualRent` | Rent amounts, as decimal strings |
 | `leaseId`, `propertyId`, `unitNumber` | Current lease and unit |
+
+---
+
+### `PATCH /auth/user`
+
+Change your own name and phone number. Works for every role (owner, property manager, tenant). **Auth:** access token.
+
+**Request body** – only the fields sent are changed; at least one is required.
+
+| Field | Type | Required | Rules |
+|---|---|---|---|
+| `firstName` | string | no | Not blank; max 80 characters; trimmed |
+| `lastName` | string | no | Not blank; max 80 characters; trimmed |
+| `phoneNumber` | string | no | Not blank; max 30 characters; trimmed |
+
+Email can't be changed.
+
+```json
+{ "firstName": "Ngozi", "phoneNumber": "08012345678" }
+```
+
+**Response `200`** – `message: "profile updated"`.
+
+```json
+{
+  "status": "success",
+  "message": "profile updated",
+  "data": {
+    "user": { "id": "6", "email": "owner@example.com", "firstName": "Ngozi", "lastName": "Eze", "phoneNumber": "08012345678", "role": "owner", "createdAt": "…" },
+    "accessToken": "eyJhbGciOi..."
+  }
+}
+```
+
+`user` has the same shape as [`GET /auth/user`](#get-authuser). `accessToken` is a new access token carrying the updated details: replace the stored one, because names recorded on new payments, complaints and messages come from the token. The refresh token is unchanged. Records created before the change keep the name they were saved with.
+
+**Errors**
+
+| Status | `message` | When |
+|---|---|---|
+| 400 | `invalid request` | Nothing sent, a blank value, or a value too long |
+| 401 | `invalid request` / `invalid token` | See [Authentication](#authentication) |
+| 404 | `record not found in the db` | The user no longer exists |
+| 500 | `something went wrong` | |
 
 ---
 
@@ -2102,7 +2148,7 @@ All maintenance endpoints require an access token.
 - **Tenants file complaints** about problems in their unit. The property and unit are taken from the tenant's active lease. Complaints can't be edited or withdrawn.
 - **Owners and managers open issues** – maintenance jobs on a property – and link one or more complaints to each. An issue can also be opened with no complaints (e.g. a routine inspection). A complaint can be linked to one issue only, and only to an issue on its own property.
 - **Status flows from the issue.** Linking a complaint gives it the issue's status. Posting an issue update can change the issue's status, and every linked complaint gets the same status.
-- **Complaint timelines mirror the issue.** Linking adds a "being investigated" entry to the complaint's timeline; every issue update is copied onto the timeline of each linked complaint. Tenants follow progress through their complaint and its updates; issues themselves are visible to owners and managers only.
+- **Complaint timelines mirror the issue.** Linking adds a "being investigated" entry to the complaint's timeline, and unlinking adds a "no longer part of the issue" entry and reopens the complaint; every issue update is copied onto the timeline of each linked complaint. Tenants follow progress through their complaint and its updates; issues themselves are visible to owners and managers only.
 - **Tenants are notified** of each issue update through [messaging](#messages) – on the channels requested, in-app by default.
 
 **Values**
@@ -2120,6 +2166,8 @@ All maintenance endpoints require an access token.
 | Field | Type | Description |
 |---|---|---|
 | `id` | integer | |
+| `title` | string | Short summary; empty on complaints filed before titles existed |
+| `location` | string | Where in the unit, e.g. `Kitchen`; may be empty |
 | `message` | string | The tenant's description |
 | `category`, `urgency`, `status` | string | See values above |
 | `tenantId` | integer | |
@@ -2167,12 +2215,14 @@ File a complaint. **Auth:** tenant with an active lease.
 
 | Field | Type | Required | Rules |
 |---|---|---|---|
+| `title` | string | yes | Short summary, max 120 characters; trimmed, and can't be blank |
+| `location` | string | no | Where in the unit, max 80 characters |
 | `category` | string | yes | See values |
 | `urgency` | string | yes | See values |
 | `message` | string | yes | |
 
 ```json
-{ "category": "plumbing", "urgency": "urgent", "message": "Kitchen tap is leaking" }
+{ "title": "Leaking kitchen tap", "location": "Kitchen", "category": "plumbing", "urgency": "urgent", "message": "The tap drips constantly" }
 ```
 
 **Response `201`** – `message: "complaint created"`, `data` is a [Complaint](#complaint-object) with `status: "open"`.
@@ -2363,6 +2413,24 @@ Link more complaints to an issue. They take the issue's current status and get a
 | 400 | `invalid complaints: <ids>` | |
 | 403 | `invalid credentials` | Caller is a tenant |
 | 404 | `issue not found` | |
+| 500 | `something went wrong` | |
+
+---
+
+### `DELETE /maintenance/issues/{id}/complaints/{complaintId}`
+
+Unlink a complaint from an issue. In one transaction the complaint goes back to `open` with no issue, stops receiving the issue's updates, and gets a timeline entry saying it is no longer part of the issue. It can be linked again later. **Auth:** owner or manager of the issue's property.
+
+**Response `200`** – `message: "complaint unlinked"`, `data` is the updated issue detail.
+
+**Errors**
+
+| Status | `message` | When |
+|---|---|---|
+| 400 | `invalid request` | An ID is not a positive integer |
+| 403 | `invalid credentials` | Caller is a tenant |
+| 404 | `issue not found` | |
+| 404 | `complaint not linked to this issue` | The complaint doesn't exist or isn't linked to this issue |
 | 500 | `something went wrong` | |
 
 ---

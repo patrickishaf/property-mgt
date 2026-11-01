@@ -27,6 +27,7 @@ func (this *router) GetPath() string {
 func (this *router) RegisterRoutes(router *gin.RouterGroup) {
 	router.POST("/accounts", this.http.createOwnerAccount)
 	router.GET("/user", net.VerifyJWT(this.cfg.JWTSecretKey), this.http.getAuthenticatedUser)
+	router.PATCH("/user", net.VerifyJWT(this.cfg.JWTSecretKey), this.http.updateAuthenticatedUser)
 	router.POST("/login", this.http.loginWithPassword)
 	router.POST("/token/refresh", this.http.refreshAuthToken)
 	router.POST("/password/set", this.http.setPassword)

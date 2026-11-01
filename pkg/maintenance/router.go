@@ -39,4 +39,5 @@ func (this *router) RegisterRoutes(router *gin.RouterGroup) {
 	router.GET("/issues/:id/updates", this.http.getIssueUpdates)
 	router.POST("/issues/:id/updates", this.http.postIssueUpdate)
 	router.POST("/issues/:id/complaints", this.http.linkComplaints)
+	router.DELETE("/issues/:id/complaints/:complaintId", this.http.unlinkComplaint)
 }

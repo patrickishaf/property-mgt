@@ -141,6 +141,59 @@ paths:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '500':
           $ref: '#/components/responses/ServerError'
+    patch:
+      tags: [Auth]
+      operationId: updateAuthenticatedUser
+      summary: Update your own profile
+      description: |
+        Any signed-in user (owner, manager or tenant) changes their own first name, last name and/or phone
+        number. Only fields sent are changed; at least one is required and none may be blank (values are
+        trimmed). Email can't be changed. Returns the updated user and a new access token carrying the new
+        details; the refresh token is unchanged.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserRequest'
+      responses:
+        '200':
+          description: Updated (`message` is `profile updated`).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [user, accessToken]
+                        properties:
+                          user:
+                            oneOf:
+                              - $ref: '#/components/schemas/AdminUser'
+                              - $ref: '#/components/schemas/TenantUser'
+                          accessToken:
+                            type: string
+        '400':
+          description: '`invalid request`: nothing sent, a blank value, or a value too long'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: '`record not found in the db` (the user no longer exists)'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/ServerError'
 
   /auth/token/refresh:
     post:
@@ -2565,6 +2618,61 @@ paths:
         '500':
           $ref: '#/components/responses/ServerError'
 
+  /maintenance/issues/{id}/complaints/{complaintId}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Issue ID
+        schema:
+          type: integer
+          minimum: 1
+      - name: complaintId
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+    delete:
+      tags: [Maintenance]
+      operationId: unlinkComplaint
+      summary: Unlink a complaint from an issue
+      description: |
+        Owner or manager of the issue's property. The complaint goes back to `open` with no issue, stops
+        receiving the issue's updates, and gets a timeline entry saying it is no longer part of the issue.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: The updated issue (`message` is `complaint unlinked`).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/IssueDetail'
+        '400':
+          description: '`invalid request`: an ID is not a positive integer'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: '`issue not found` or `complaint not linked to this issue`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
   /maintenance/issues/{id}/updates:
     parameters:
       - name: id
@@ -2823,6 +2931,23 @@ components:
           type: string
         refreshToken:
           type: string
+
+    UpdateUserRequest:
+      type: object
+      description: At least one field; none may be blank.
+      properties:
+        firstName:
+          type: string
+          maxLength: 80
+        lastName:
+          type: string
+          maxLength: 80
+        phoneNumber:
+          type: string
+          maxLength: 30
+      example:
+        firstName: Ngozi
+        phoneNumber: '08012345678'
 
     AdminUser:
       type: object
@@ -3919,10 +4044,16 @@ components:
 
     Complaint:
       type: object
-      required: [id, category, createdAt, issueId, message, propertyId, status, tenantFullName, tenantId, unitNumber, urgency]
+      required: [id, category, createdAt, issueId, location, message, propertyId, status, tenantFullName, tenantId, title, unitNumber, urgency]
       properties:
         id:
           type: integer
+        title:
+          type: string
+          description: Short summary; empty on complaints filed before titles existed.
+        location:
+          type: string
+          description: Where in the unit, e.g. `Kitchen`; may be empty.
         category:
           type: string
           enum: [electrical, plumbing, structural, lighting, security, other]
@@ -4074,8 +4205,17 @@ components:
 
     CreateComplaintRequest:
       type: object
-      required: [category, urgency, message]
+      required: [title, category, urgency, message]
       properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 120
+          description: Short summary; leading and trailing spaces are trimmed and it can't be blank.
+        location:
+          type: string
+          maxLength: 80
+          description: Where in the unit; optional.
         category:
           type: string
           enum: [electrical, plumbing, structural, lighting, security, other]

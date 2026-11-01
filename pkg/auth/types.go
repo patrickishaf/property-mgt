@@ -23,3 +23,11 @@ type refreshAuthTokenReq struct {
 	AccessToken  string `json:"accessToken" binding:"required"`
 	RefreshToken string `json:"refreshToken" binding:"required"`
 }
+
+// updateUserReq changes the signed-in user's own profile. Only the fields sent
+// change; at least one is required, and none may be blank.
+type updateUserReq struct {
+	FirstName   *string `json:"firstName" binding:"omitempty,max=80"`
+	LastName    *string `json:"lastName" binding:"omitempty,max=80"`
+	PhoneNumber *string `json:"phoneNumber" binding:"omitempty,max=30"`
+}

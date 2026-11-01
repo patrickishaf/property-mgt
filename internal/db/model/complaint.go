@@ -35,11 +35,15 @@ type Complaint struct {
 	CreatorFullName string
 	CreatorID       int   `gorm:"index"`
 	IssueID         *uint `gorm:"index"`
-	Message         string
-	PropertyID      int `gorm:"index"`
-	Status          string
-	UnitNumber      string
-	Urgency         string
+	// Location is where in the unit the problem is, e.g. "Kitchen"; optional.
+	Location   string
+	Message    string
+	PropertyID int `gorm:"index"`
+	Status     string
+	// Title is a short summary; empty on complaints filed before it existed.
+	Title      string
+	UnitNumber string
+	Urgency    string
 }
 
 type ComplaintUpdate struct {

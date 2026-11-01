@@ -143,6 +143,14 @@ func (this *httpHandler) linkComplaints(c *gin.Context) {
 	net.Respond(c, this.svc.linkComplaints(actor, ids[0], body), "complaints linked")
 }
 
+func (this *httpHandler) unlinkComplaint(c *gin.Context) {
+	actor, ids, ok := requestActor(c, "id", "complaintId")
+	if !ok {
+		return
+	}
+	net.Respond(c, this.svc.unlinkComplaint(actor, ids[0], ids[1]), "complaint unlinked")
+}
+
 func (this *httpHandler) postIssueUpdate(c *gin.Context) {
 	actor, ids, ok := requestActor(c, "id")
 	var body postIssueUpdateReq

@@ -2,6 +2,7 @@ package maintenance
 
 import (
 	"log/slog"
+	"strings"
 
 	"github.com/patrickishaf/property-mgt/common"
 	"github.com/patrickishaf/property-mgt/config"
@@ -92,6 +93,9 @@ func (this *service) createComplaint(actor *common.Actor, dto createComplaintReq
 	if actor.Role != common.ActorRoleTenant {
 		return forbidden()
 	}
+	if strings.TrimSpace(dto.Title) == "" || strings.TrimSpace(dto.Message) == "" {
+		return common.ServiceResponse{StatusCode: 400, Err: common.ErrInvalidRequest}
+	}
 	lease, err := this.leaseRepo.FindActiveByTenant(actor.ID)
 	if err != nil {
 		logger.Error("failed to find active lease", "err", err.Error())
@@ -105,9 +109,11 @@ func (this *service) createComplaint(actor *common.Actor, dto createComplaintReq
 		Category:        dto.Category,
 		CreatorFullName: fullName(actor),
 		CreatorID:       int(actor.ID),
+		Location:        strings.TrimSpace(dto.Location),
 		Message:         dto.Message,
 		PropertyID:      lease.PropertyID,
 		Status:          model.MaintenanceStatusOpen,
+		Title:           strings.TrimSpace(dto.Title),
 		UnitNumber:      lease.UnitNumber,
 		Urgency:         dto.Urgency,
 	}

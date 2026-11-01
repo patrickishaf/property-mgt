@@ -222,6 +222,50 @@ func (this *service) linkComplaints(actor *common.Actor, issueID uint, dto linkC
 	return this.issueDetail(issue, property, 200, logger)
 }
 
+var errComplaintNotLinked = errors.New("complaint not linked to this issue")
+
+// unlinkComplaint detaches a complaint from an issue: it goes back to open and
+// unlinked, stops following the issue's updates, and its timeline says so.
+func (this *service) unlinkComplaint(actor *common.Actor, issueID uint, complaintID uint) common.ServiceResponse {
+	logger := this.logger.With("caller", "maintenance.service.unlinkComplaint", "actor", actor.Email)
+	issue, property, errRes := this.findAdminIssue(actor, issueID, logger)
+	if errRes != nil {
+		return *errRes
+	}
+	err := this.db.Transaction(func(trx *gorm.DB) error {
+		locked, err := this.issueRepo.FindOneByIdForUpdateTRX(issue.ID, trx)
+		if err != nil {
+			return err
+		}
+		issue = locked
+		found, err := this.complaintRepo.FindByIdsForUpdateTRX([]uint{complaintID}, trx)
+		if err != nil {
+			return err
+		}
+		if len(found) == 0 || found[0].IssueID == nil || *found[0].IssueID != locked.ID {
+			return errComplaintNotLinked
+		}
+		if err := this.complaintRepo.UnlinkTRX(complaintID, trx); err != nil {
+			return err
+		}
+		return this.complaintUpdateRepo.SaveManyTRX([]model.ComplaintUpdate{{
+			ComplaintID:     complaintID,
+			CreatorFullName: fullName(actor),
+			CreatorID:       int(actor.ID),
+			Message:         fmt.Sprintf("Your complaint is no longer part of the issue %q. Management will follow it up separately.", locked.Title),
+			Status:          model.MaintenanceStatusOpen,
+		}}, trx)
+	})
+	if errors.Is(err, errComplaintNotLinked) {
+		return common.ServiceResponse{StatusCode: 404, Err: err.Error()}
+	}
+	if err != nil {
+		logger.Error("failed to unlink complaint", "err", err.Error())
+		return serverError()
+	}
+	return this.issueDetail(issue, property, 200, logger)
+}
+
 func (this *service) postIssueUpdate(actor *common.Actor, issueID uint, dto postIssueUpdateReq) common.ServiceResponse {
 	logger := this.logger.With("caller", "maintenance.service.postIssueUpdate", "actor", actor.Email)
 	issue, property, errRes := this.findAdminIssue(actor, issueID, logger)

@@ -136,6 +136,12 @@ func (this *ComplaintRepository) LinkToIssueTRX(ids []uint, issueID uint, status
 		Updates(map[string]any{"issue_id": issueID, "status": status}).Error
 }
 
+// UnlinkTRX detaches a complaint from its issue and reopens it.
+func (this *ComplaintRepository) UnlinkTRX(id uint, trx *gorm.DB) error {
+	return trx.Model(&model.Complaint{}).Where("id = ?", id).
+		Updates(map[string]any{"issue_id": nil, "status": model.MaintenanceStatusOpen}).Error
+}
+
 // UpdateStatusByIssueTRX sets the status of every complaint linked to the issue.
 func (this *ComplaintRepository) UpdateStatusByIssueTRX(issueID uint, status string, trx *gorm.DB) error {
 	return trx.Model(&model.Complaint{}).Where("issue_id = ?", issueID).Update("status", status).Error

@@ -3,6 +3,7 @@ package auth
 import (
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v4"
@@ -384,4 +385,83 @@ func (this *service) setPassword(dto setPasswordReq) common.ServiceResponse {
 		"accessToken":  accessToken,
 		"refreshToken": refreshToken,
 	}}
+}
+
+// profileFields turns an update request into trimmed column values, or false
+// if nothing was sent or a sent value is blank.
+func profileFields(dto updateUserReq) (map[string]any, bool) {
+	fields := map[string]any{}
+	for column, value := range map[string]*string{
+		"first_name":   dto.FirstName,
+		"last_name":    dto.LastName,
+		"phone_number": dto.PhoneNumber,
+	} {
+		if value == nil {
+			continue
+		}
+		trimmed := strings.TrimSpace(*value)
+		if trimmed == "" {
+			return nil, false
+		}
+		fields[column] = trimmed
+	}
+	return fields, len(fields) > 0
+}
+
+// updateAuthenticatedUser lets any signed-in user change their own name and
+// phone number. It returns the updated user and a new access token, because the
+// token carries the user's name and phone and other modules record them from it.
+func (this *service) updateAuthenticatedUser(actor *common.Actor, dto updateUserReq) common.ServiceResponse {
+	logger := this.logger.With("caller", "auth.service.updateAuthenticatedUser", "actor", actor.Email)
+	fields, ok := profileFields(dto)
+	if !ok {
+		return common.ServiceResponse{StatusCode: 400, Err: common.ErrInvalidRequest}
+	}
+
+	var updated common.Actor
+	var user any
+	switch actor.Role {
+	case common.AdminRoleOwner.ToString(), common.AdminRoleManager.ToString():
+		if err := this.adminRepo.UpdateProfile(actor.ID, fields); err != nil {
+			logger.Error("failed to update admin profile", "err", err.Error())
+			return common.ServiceResponse{StatusCode: 500, Err: common.ErrGeneric}
+		}
+		admin, err := this.adminRepo.FindOneById(actor.ID)
+		if err != nil {
+			logger.Error("failed to find admin by id", "err", err.Error())
+			return common.ServiceResponse{StatusCode: 500, Err: common.ErrGeneric}
+		}
+		if admin == nil {
+			return common.ServiceResponse{StatusCode: 404, Err: common.ErrDBRecordNotFound}
+		}
+		updated = common.Actor{ID: admin.ID, Email: admin.Email, FirstName: admin.FirstName,
+			LastName: admin.LastName, PhoneNumber: admin.PhoneNumber, Role: admin.Role}
+		user = admin.Safe()
+	case common.ActorRoleTenant:
+		if err := this.tenantRepo.UpdateProfile(actor.ID, fields); err != nil {
+			logger.Error("failed to update tenant profile", "err", err.Error())
+			return common.ServiceResponse{StatusCode: 500, Err: common.ErrGeneric}
+		}
+		tenant, err := this.tenantRepo.FindOneById(actor.ID)
+		if err != nil {
+			logger.Error("failed to find tenant by id", "err", err.Error())
+			return common.ServiceResponse{StatusCode: 500, Err: common.ErrGeneric}
+		}
+		if tenant == nil {
+			return common.ServiceResponse{StatusCode: 404, Err: common.ErrDBRecordNotFound}
+		}
+		updated = common.Actor{ID: tenant.ID, Email: tenant.Email, FirstName: tenant.FirstName,
+			LastName: tenant.LastName, PhoneNumber: tenant.PhoneNumber, Role: common.ActorRoleTenant}
+		user = tenant.SafeMap()
+	default:
+		logger.Error("actor role is unrecognized", "actor_role", actor.Role)
+		return common.ServiceResponse{StatusCode: 400, Err: common.ErrInvalidRequest}
+	}
+
+	accessToken, err := common.GenerateJWT(*this.cfg, updated)
+	if err != nil {
+		logger.Error("failed to generate access token", "err", err.Error())
+		return common.ServiceResponse{StatusCode: 500, Err: common.ErrGeneric}
+	}
+	return common.ServiceResponse{StatusCode: 200, Data: map[string]any{"user": user, "accessToken": accessToken}}
 }

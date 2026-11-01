@@ -28,6 +28,20 @@ func (this *httpHandler) createOwnerAccount(c *gin.Context) {
 	net.Respond(c, this.srv.createOwnerAccount(body), "account created")
 }
 
+func (this *httpHandler) updateAuthenticatedUser(c *gin.Context) {
+	actor, ok := net.GetActor(c)
+	if !ok {
+		c.IndentedJSON(401, net.ErrorResponse(common.ErrInvalidCredentials, nil))
+		return
+	}
+	var body updateUserReq
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.IndentedJSON(400, net.ErrorResponse(common.ErrInvalidRequest, nil))
+		return
+	}
+	net.Respond(c, this.srv.updateAuthenticatedUser(actor, body), "profile updated")
+}
+
 func (this *httpHandler) getAuthenticatedUser(c *gin.Context) {
 	actor, ok := net.GetActor(c)
 	if !ok {

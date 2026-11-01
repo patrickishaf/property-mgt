@@ -26,7 +26,9 @@ func (this pageReq) values() (int, int) {
 
 type createComplaintReq struct {
 	Category string `json:"category" binding:"required,oneof=electrical plumbing structural lighting security other"`
+	Location string `json:"location" binding:"max=80"`
 	Message  string `json:"message" binding:"required"`
+	Title    string `json:"title" binding:"required,max=120"`
 	Urgency  string `json:"urgency" binding:"required,oneof=low normal urgent"`
 }
 
@@ -82,10 +84,12 @@ type complaintRes struct {
 	Category       string    `json:"category"`
 	CreatedAt      time.Time `json:"createdAt"`
 	IssueID        *uint     `json:"issueId"`
+	Location       string    `json:"location"`
 	Message        string    `json:"message"`
 	PropertyID     int       `json:"propertyId"`
 	Status         string    `json:"status"`
 	TenantFullName string    `json:"tenantFullName"`
+	Title          string    `json:"title"`
 	TenantID       int       `json:"tenantId"`
 	UnitNumber     string    `json:"unitNumber"`
 	Urgency        string    `json:"urgency"`
@@ -142,10 +146,12 @@ func toComplaintRes(c model.Complaint) complaintRes {
 		Category:       c.Category,
 		CreatedAt:      c.CreatedAt,
 		IssueID:        c.IssueID,
+		Location:       c.Location,
 		Message:        c.Message,
 		PropertyID:     c.PropertyID,
 		Status:         c.Status,
 		TenantFullName: c.CreatorFullName,
+		Title:          c.Title,
 		TenantID:       c.CreatorID,
 		UnitNumber:     c.UnitNumber,
 		Urgency:        c.Urgency,
