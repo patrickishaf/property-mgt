@@ -1,12 +1,15 @@
 package payment
 
 import (
+	"encoding/json"
+	"io"
 	"log"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/patrickishaf/property-mgt/common"
 	"github.com/patrickishaf/property-mgt/internal/net"
+	"github.com/patrickishaf/property-mgt/providers/bachs"
 )
 
 type httpHandler struct {
@@ -99,6 +102,26 @@ func (this *httpHandler) initiateCheckout(c *gin.Context) {
 		return
 	}
 	net.Respond(c, this.svc.initiateCheckout(actor, body), "checkout created")
+}
+
+// bachsWebhook receives Bachs checkout events. It is unauthenticated, so every
+// delivery must be verified as coming from Bachs before it is trusted.
+func (this *httpHandler) bachsWebhook(c *gin.Context) {
+	raw, err := io.ReadAll(io.LimitReader(c.Request.Body, 1<<20))
+	if err != nil {
+		c.IndentedJSON(400, net.ErrorResponse(common.ErrInvalidRequest, nil))
+		return
+	}
+	if !this.svc.verifyBachsWebhook(c.Request.Header, raw) {
+		c.IndentedJSON(401, net.ErrorResponse(common.ErrInvalidCredentials, nil))
+		return
+	}
+	var event bachs.WebhookEvent
+	if err := json.Unmarshal(raw, &event); err != nil || event.Type == "" || event.Data.Reference == "" {
+		c.IndentedJSON(400, net.ErrorResponse(common.ErrInvalidRequest, nil))
+		return
+	}
+	net.Respond(c, this.svc.handleBachsEvent(event), "webhook received")
 }
 
 func (this *httpHandler) completeCheckout(c *gin.Context) {

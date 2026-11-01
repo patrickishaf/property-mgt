@@ -56,6 +56,7 @@ Human-readable reference for the HTTP API. The machine-readable contract is [`op
   - [`GET /payments/stats`](#get-paymentsstats) – portfolio totals
   - [`POST /payments/checkout`](#post-paymentscheckout) – tenant starts a checkout
   - [`POST /payments/checkout/{reference}/complete`](#post-paymentscheckoutreferencecomplete) – complete a checkout (development only)
+  - [`POST /payments/webhooks/bachs`](#post-paymentswebhooksbachs) – Bachs checkout events
 - [Leases](#leases)
   - [Lease lifecycle](#lease-lifecycle)
   - [Objects](#lease-object)
@@ -1375,7 +1376,34 @@ Rent figures for a year across the caller's properties – the Overview page's K
 
 Start a checkout for one of the tenant's leases: the `leaseId` given, otherwise their active lease, otherwise their most recent lease that still has a balance (for example a terminated lease). Creates an `unpaid` payment and returns the provider's checkout URL. Only one open checkout per lease is allowed at a time. **Auth:** tenant.
 
-> The payment provider (Bachs) is currently stubbed: `checkoutUrl` points to `<WEB_APP_URL>/checkout/stub?reference=…`, and checkouts are completed with the [development-only route](#post-paymentscheckoutreferencecomplete).
+The checkout is created with Bachs (`POST <BACHS_API_BASE_URL>/v1/checkout-sessions`) at a fixed price in `PAYMENT_CURRENCY`, with the tenant's email, name and phone as the customer. When the tenant finishes or leaves the Bachs page, Bachs sends them back to the web app:
+
+- success: `<WEB_APP_URL>/payments/checkout/return?reference=<reference>`
+- cancel: `<WEB_APP_URL>/payments/checkout/return?reference=<reference>&cancelled=true`
+
+Returning to the success URL doesn't mean the payment is applied yet: that happens when the [Bachs webhook](#post-paymentswebhooksbachs) arrives, so the return page should read the payment's `status`.
+
+**Checkout metadata.** Every checkout carries the same metadata keys, and Bachs sends them back on its webhooks. All values are strings.
+
+| Key | Value |
+|---|---|
+| `kind` | Always `rent_payment`: marks the checkout as an Aventra rent payment |
+| `schema_version` | `1` |
+| `payment_id` | ID of the payment this checkout settles |
+| `purpose` | `lease`, `installments` or `partial` (the request's `type`) |
+| `target_type` | What is being paid for: `lease` (for `lease` and `partial`) or `installments` |
+| `target_ids` | Comma-separated IDs of `target_type`: the lease ID, or the installment IDs, e.g. `31,32` |
+| `lease_id` | Always the lease, including for installments |
+| `tenant_id`, `property_id` | The tenant paying and their property |
+
+```json
+{
+  "kind": "rent_payment", "schema_version": "1", "payment_id": "40", "purpose": "installments",
+  "target_type": "installments", "target_ids": "31,32", "lease_id": "12", "tenant_id": "7", "property_id": "3"
+}
+```
+
+> In development with no `BACHS_API_KEY`, checkouts are stubbed: `checkoutUrl` points to `<WEB_APP_URL>/checkout/stub?reference=…`, and checkouts are completed with the [development-only route](#post-paymentscheckoutreferencecomplete) or a simulated webhook. Outside development both `BACHS_API_BASE_URL` and `BACHS_API_KEY` are required.
 
 **Request body**
 
@@ -1413,7 +1441,7 @@ Start a checkout for one of the tenant's leases: the `leaseId` given, otherwise 
 
 ### `POST /payments/checkout/{reference}/complete`
 
-**Development only** (registered when `APP_ENV=development`; no token required). Simulates the payment provider confirming a checkout: allocates the payment to the lease and installments and creates a receipt. A future provider webhook will run the same logic.
+**Development only** (registered when `APP_ENV=development`; no token required). Simulates the payment provider confirming a checkout: allocates the payment to the lease and installments and creates a receipt. The [Bachs webhook](#post-paymentswebhooksbachs) runs the same logic for real checkouts.
 
 **Response `200`** – `message: "checkout completed"`, `data` is a [payment detail](#payment-object) with status `paid` or `partially_paid`.
 
@@ -1427,6 +1455,48 @@ Start a checkout for one of the tenant's leases: the `leaseId` given, otherwise 
 | 409 | `checkout has expired` | Past `expiresAt`; the payment is marked `expired` |
 | 409 | `amount exceeds outstanding balance` | The lease balance dropped below the checkout amount since it started |
 | 500 | `something went wrong` | |
+
+---
+
+### `POST /payments/webhooks/bachs`
+
+Receives Bachs checkout events. **Auth:** none (called by Bachs); every delivery is verified by its signature instead.
+
+**Signature.** The `X-Bachs-Signature-V2` header holds `t=<unix seconds>,v1=<hex signature>` (it may carry several `v1` values while Bachs rotates secrets). A delivery is accepted when:
+
+- one `v1` equals the hex HMAC-SHA256 of `"<t>." + <raw request body>`, keyed with `BACHS_WH_SECRET`, and
+- `t` is within 5 minutes of the server's clock, so old deliveries can't be replayed.
+
+With no `BACHS_WH_SECRET` set, unsigned deliveries are accepted only when `APP_ENV=development` (for simulating webhooks locally), and every delivery is rejected elsewhere.
+
+**Request body** – a Bachs event. The fields used:
+
+| Field | Use |
+|---|---|
+| `type` | `checkout.completed` or `checkout.expired`; other types are acknowledged and ignored |
+| `data.reference` | The payment's `reference`; finds the payment |
+| `data.metadata.kind` | Events whose `kind` isn't `rent_payment` are ignored |
+| `data.metadata.payment_id` | Must match the payment found by reference |
+| `data.status`, `data.payment_status` | A completed event is applied only when `completed` and `paid` |
+| `data.amount`, `data.currency` | Must equal the checkout's amount (2 decimals) and currency |
+| `data.completed_at` | Used as the payment time |
+
+**Handling**
+
+- **`checkout.completed`:** the payment is allocated to the lease and installments and a receipt is created, exactly like the [development route](#post-paymentscheckoutreferencecomplete).
+- **`checkout.expired`:** an `unpaid` checkout is marked `expired`, so the tenant can start a new one.
+- **Repeated deliveries** of an event already applied are acknowledged without changing anything.
+- **Not applied:** a completed checkout is left as it is when the charged amount or currency differs, or when it can't be applied (for example the balance was paid another way meanwhile). These are logged at error level for manual follow-up.
+
+**Response `200`** – `message: "webhook received"`, `data` is `{ "outcome": "<outcome>" }` where outcome is `payment applied`, `checkout marked expired`, `already processed` or `ignored`. Anything a retry can't change gets `200` so Bachs stops redelivering it.
+
+**Errors**
+
+| Status | `message` | When |
+|---|---|---|
+| 400 | `invalid request` | Body isn't a Bachs event (no `type` or `data.reference`) |
+| 401 | `invalid credentials` | Missing, invalid or expired signature (or no `BACHS_WH_SECRET` outside development) |
+| 500 | `something went wrong` | Failure on our side; Bachs should retry |
 
 ---
 

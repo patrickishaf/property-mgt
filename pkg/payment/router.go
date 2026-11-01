@@ -31,6 +31,10 @@ func (this *router) RegisterRoutes(router *gin.RouterGroup) {
 		router.POST("/checkout/:reference/complete", this.http.completeCheckout)
 	}
 
+	// Called by Bachs, not users: authenticated by its webhook signature instead
+	// of a token.
+	router.POST("/webhooks/bachs", this.http.bachsWebhook)
+
 	authed := router.Group("", net.VerifyJWT(this.cfg.JWTSecretKey))
 	authed.POST("", this.http.createPayment)
 	authed.GET("", this.http.getPayments)

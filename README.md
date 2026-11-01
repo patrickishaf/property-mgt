@@ -61,7 +61,7 @@ Settings are read from a `.env` file in the repo root (it is git-ignored). Keys 
 | `REDIS_URL` | | Or `REDIS_HOST`, `REDIS_PORT`, `REDIS_USER`, `REDIS_PASSWORD`, `REDIS_DB` |
 | `CPAAS_API_BASE_URL` / `CPAAS_API_KEY` | | Email/SMS provider |
 | `CPAAS_SENDER_ADDR` / `CPAAS_SENDER_NAME` | / `Aventra` | From address and name on outgoing email |
-| `BACHS_API_BASE_URL` / `BACHS_API_KEY` / `BACHS_WH_SECRET` | | Online payment provider |
+| `BACHS_API_BASE_URL` / `BACHS_API_KEY` / `BACHS_WH_SECRET` | | Online payment provider. With no API key in development, checkouts are stubbed locally; outside development the URL and key are required |
 
 The schema is created and updated automatically on startup (GORM AutoMigrate in `internal/db/db.go`); there are no migration files to run.
 
@@ -138,6 +138,6 @@ docs/             API.md, openapi.yaml, ENTITIES.md
 ## Not finished yet
 
 - **Sending email/SMS.** Jobs are queued, but the cpaas worker does not process them yet, so invite links and notifications are not delivered. SMS sending is a logging stub.
-- **Online payments.** The Bachs client is a stub; use the dev-only complete route to finish a checkout locally.
+- **Online payments.** Checkouts are created with Bachs and settled by its signed webhook (`POST /payments/webhooks/bachs`, verified with `BACHS_WH_SECRET`). Locally, without a Bachs key, checkouts are stubbed and finished with the dev-only complete route or a simulated webhook (unsigned webhooks are accepted only in development with no secret set). The tenant-facing payment screens aren't connected yet.
 - **Overview "Export report".** Not built yet.
 - **Settings.** `pkg/settings` is a placeholder.

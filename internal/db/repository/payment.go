@@ -54,6 +54,18 @@ func (this *PaymentRepository) FindOneById(id uint) (*model.Payment, error) {
 	return &p, nil
 }
 
+func (this *PaymentRepository) FindOneByReference(reference string) (*model.Payment, error) {
+	var p model.Payment
+	err := this.db.Where("reference = ?", reference).First(&p).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &p, nil
+}
+
 // FindOneByReferenceForUpdateTRX loads a payment by reference and locks its row
 // for the rest of the transaction.
 func (this *PaymentRepository) FindOneByReferenceForUpdateTRX(reference string, trx *gorm.DB) (*model.Payment, error) {

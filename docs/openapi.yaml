@@ -1254,8 +1254,16 @@ paths:
       summary: Start a checkout
       description: |
         Tenant only. Pays the given `leaseId`, otherwise the tenant's active lease, otherwise their most recent
-        lease with a balance. Creates an `unpaid` payment and returns the checkout URL.
-        One open checkout per lease at a time. The provider is currently stubbed.
+        lease with a balance. Creates an `unpaid` payment and a Bachs checkout session, and returns the
+        checkout URL. One open checkout per lease at a time.
+
+        Bachs returns the tenant to `<WEB_APP_URL>/payments/checkout/return?reference=<reference>` (with
+        `&cancelled=true` when they cancel). The payment is applied when the Bachs webhook arrives.
+
+        Every checkout's metadata has the keys `kind` (`rent_payment`), `schema_version` (`1`), `payment_id`,
+        `purpose` (`lease`, `installments` or `partial`), `target_type` (`lease` or `installments`),
+        `target_ids` (comma-separated IDs of `target_type`), `lease_id`, `tenant_id` and `property_id`.
+        In development with no `BACHS_API_KEY` the checkout is stubbed.
       security:
         - bearerAuth: []
       requestBody:
@@ -1320,7 +1328,7 @@ paths:
       summary: Complete a checkout (development only)
       description: |
         Only registered when `APP_ENV=development`; no token required. Simulates the payment provider
-        confirming the checkout and applies the payment.
+        confirming the checkout and applies the payment, as the Bachs webhook does for real checkouts.
       responses:
         '200':
           description: Checkout completed (`message` is `checkout completed`).
@@ -1348,6 +1356,66 @@ paths:
         '500':
           $ref: '#/components/responses/ServerError'
 
+
+  /payments/webhooks/bachs:
+    post:
+      tags: [Payments]
+      operationId: bachsWebhook
+      summary: Bachs checkout events
+      description: |
+        Called by Bachs, not users. Handles `checkout.completed` (applies the payment, like the development
+        completion route) and `checkout.expired` (marks an unpaid checkout `expired`); other event types,
+        events whose `data.metadata.kind` isn't `rent_payment`, unknown references and repeated deliveries
+        are acknowledged without changes. A completed event is applied only when `data.status` is
+        `completed`, `data.payment_status` is `paid`, `data.metadata.payment_id` matches, and
+        `data.amount`/`data.currency` equal the checkout's.
+
+        Authenticated by the `X-Bachs-Signature-V2` header, `t=<unix seconds>,v1=<hex>`: a `v1` must equal the hex
+        HMAC-SHA256 of `"<t>." + <raw body>` keyed with `BACHS_WH_SECRET`, and `t` must be within 5 minutes
+        of now. With no secret set, unsigned deliveries are accepted only when `APP_ENV=development`.
+      parameters:
+        - name: X-Bachs-Signature-V2
+          in: header
+          required: true
+          description: '`t=<unix seconds>,v1=<hex HMAC-SHA256>`'
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BachsWebhookEvent'
+      responses:
+        '200':
+          description: Acknowledged (`message` is `webhook received`).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          outcome:
+                            type: string
+                            enum: [payment applied, checkout marked expired, already processed, ignored]
+        '400':
+          description: '`invalid request`: not a Bachs event'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: '`invalid credentials`: missing, invalid or expired signature'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/ServerError'
   /leases:
     get:
       tags: [Leases]
@@ -2664,6 +2732,47 @@ components:
             $ref: '#/components/schemas/ErrorEnvelope'
 
   schemas:
+    BachsWebhookEvent:
+      type: object
+      description: A Bachs event; only the fields the API reads are listed.
+      required: [type, data]
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          example: checkout.completed
+        created_at:
+          type: string
+        data:
+          type: object
+          required: [reference]
+          properties:
+            checkout_id:
+              type: string
+            status:
+              type: string
+              enum: [open, completed, expired, cancelled]
+            payment_status:
+              type: string
+              nullable: true
+            amount:
+              type: string
+              example: '600000.00'
+            currency:
+              type: string
+              example: NGN
+            reference:
+              type: string
+            metadata:
+              type: object
+              additionalProperties:
+                type: string
+            completed_at:
+              type: string
+              nullable: true
+            expires_at:
+              type: string
     Envelope:
       type: object
       required: [status, message, data]

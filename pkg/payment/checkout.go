@@ -2,6 +2,7 @@ package payment
 
 import (
 	"errors"
+	"net/url"
 	"strconv"
 	"time"
 
@@ -129,16 +130,23 @@ func (this *service) initiateCheckout(actor *common.Actor, dto initiateCheckoutR
 		return serverError()
 	}
 
+	returnURL := this.cfg.WebAppURL + "/payments/checkout/return?reference=" + url.QueryEscape(payment.Reference)
 	body := bachs.CreateCheckoutSessionBody{
-		BillingCurrency: this.cfg.PaymentCurrency,
-		Metadata:        map[string]string{"paymentId": formatID(payment.ID), "leaseId": formatID(lease.ID)},
-		Reference:       payment.Reference,
+		Pricing: bachs.Pricing{
+			PriceType: bachs.PriceTypeFixed,
+			Amount:    formatAmount(amount),
+			Currency:  this.cfg.PaymentCurrency,
+		},
+		SuccessURL: returnURL,
+		CancelURL:  returnURL + "&cancelled=true",
+		Customer: bachs.Customer{
+			Email:       tenant.Email,
+			Name:        payment.TenantFullName,
+			PhoneNumber: tenant.PhoneNumber,
+		},
+		Metadata:  checkoutMetadata(payment, dto.InstallmentIDs).toMap(),
+		Reference: payment.Reference,
 	}
-	body.Pricing.Amount = formatAmount(amount)
-	body.Pricing.Currency = this.cfg.PaymentCurrency
-	body.Customer.Email = tenant.Email
-	body.Customer.Name = payment.TenantFullName
-	body.Customer.PhoneNumber = tenant.PhoneNumber
 	checkout, err := this.bachsClient.InitiateCheckout(body)
 	if err != nil {
 		logger.Error("failed to initiate checkout", "err", err.Error())
@@ -172,11 +180,10 @@ var (
 	errCheckoutNotCheckout = errors.New("payment is not a checkout")
 )
 
-// completeCheckout settles an unpaid checkout as if the provider had confirmed
-// it. A Bachs webhook should call this once the integration exists.
-func (this *service) completeCheckout(reference string) common.ServiceResponse {
-	logger := this.logger.With("caller", "payment.service.completeCheckout", "reference", reference)
-	now := time.Now()
+// settleCheckout applies an unpaid checkout as paid at paidAt, in one
+// transaction, and returns the updated payment. The checkout must not have
+// expired by paidAt.
+func (this *service) settleCheckout(reference string, paidAt time.Time) (*model.Payment, error) {
 	var payment *model.Payment
 	err := this.db.Transaction(func(trx *gorm.DB) error {
 		var err error
@@ -193,11 +200,19 @@ func (this *service) completeCheckout(reference string) common.ServiceResponse {
 		if payment.Status != model.PaymentStatusUnpaid {
 			return errCheckoutNotUnpaid
 		}
-		if payment.ExpiresAt != nil && !payment.ExpiresAt.After(now) {
+		if payment.ExpiresAt != nil && !payment.ExpiresAt.After(paidAt) {
 			return errCheckoutExpired
 		}
-		return this.applyPayment(trx, payment, now)
+		return this.applyPayment(trx, payment, paidAt)
 	})
+	return payment, err
+}
+
+// completeCheckout settles an unpaid checkout as if the provider had confirmed
+// it now. It backs the development-only completion route for stub checkouts.
+func (this *service) completeCheckout(reference string) common.ServiceResponse {
+	logger := this.logger.With("caller", "payment.service.completeCheckout", "reference", reference)
+	payment, err := this.settleCheckout(reference, time.Now())
 	switch {
 	case err == nil:
 		return this.paymentDetail(payment, 200, logger)
