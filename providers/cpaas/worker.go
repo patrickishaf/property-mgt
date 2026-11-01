@@ -1,6 +1,7 @@
 package cpaas
 
 import (
+	"log/slog"
 	"sync"
 
 	"github.com/patrickishaf/property-mgt/common"
@@ -9,18 +10,18 @@ import (
 type worker struct {
 	client      *client
 	cronManager *common.Scheduler
-	mu          *sync.Mutex
+	mu          sync.Mutex
 }
 
 func NewWorker(client *client, cronManager *common.Scheduler) *worker {
-	var mu *sync.Mutex
-	w := worker{
+	w := &worker{
 		client:      client,
 		cronManager: cronManager,
-		mu:          mu,
 	}
-	w.cronManager.Cron().AddFunc("@every 5s", w.runJob)
-	return &w
+	if _, err := w.cronManager.Cron().AddFunc("@every 5s", w.runJob); err != nil {
+		slog.Error("failed to schedule cpaas worker", "err", err.Error())
+	}
+	return w
 }
 
 func (this *worker) runJob() {

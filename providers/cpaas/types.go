@@ -3,10 +3,20 @@ package cpaas
 type emailReceiver map[string]map[string]string
 
 type EmailJob struct {
-	Payload   map[string]string
-	Recipient EmailRecipient
-	Subject   string
-	Type      EmailType
+	// MessageRecipientID links the job to a messaging recipient so the worker
+	// can record delivery; zero for emails that aren't messages (e.g. invites).
+	MessageRecipientID uint `json:",omitempty"`
+	Payload            map[string]string
+	// Recipients are all sent in the request's "to" list.
+	Recipients []EmailRecipient
+	Subject    string
+	Type       EmailType
+}
+
+type SMSJob struct {
+	Body               string
+	MessageRecipientID uint `json:",omitempty"`
+	PhoneNumber        string
 }
 
 type EmailRecipient struct {

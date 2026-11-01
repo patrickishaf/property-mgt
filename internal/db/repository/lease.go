@@ -248,3 +248,47 @@ func (this *LeaseRepository) FindLatestWithBalanceByTenant(tenantID uint) (*mode
 	}
 	return &l, nil
 }
+
+// TenantContact is a tenant with an active lease, as offered when choosing
+// message recipients.
+type TenantContact struct {
+	Email             string
+	FirstName         string
+	HasOverdueBalance bool
+	LastName          string
+	PhoneNumber       string
+	PropertyID        uint
+	PropertyName      string
+	TenantID          uint
+	UnitNumber        string
+}
+
+// FindActiveTenantContacts returns tenants with an active lease on the scoped
+// properties. A tenant has an overdue balance when their lease has an
+// installment past its due date with money owed or, for a lease without
+// installments, when rent is still owed after the lease start date.
+func (this *LeaseRepository) FindActiveTenantContacts(ownerID uint, managerID uint, propertyID uint, now time.Time) ([]TenantContact, error) {
+	query := this.db.Table("leases AS l").
+		Select(`t.id AS tenant_id, t.first_name, t.last_name, t.email, t.phone_number,
+			l.property_id, p.name AS property_name, l.unit_number,
+			CASE WHEN EXISTS (SELECT 1 FROM installments i WHERE i.lease_id = l.id AND i.deleted_at IS NULL)
+				THEN EXISTS (SELECT 1 FROM installments i WHERE i.lease_id = l.id AND i.deleted_at IS NULL
+					AND i.outstanding_amount > 0 AND i.due_date < ?)
+				ELSE l.outstanding_rent > 0 AND l.start_date < ?
+			END AS has_overdue_balance`, now, now).
+		Joins("JOIN tenants t ON t.id = l.tenant_id AND t.deleted_at IS NULL").
+		Joins("JOIN properties p ON p.id = l.property_id AND p.deleted_at IS NULL").
+		Where("l.status = ? AND l.deleted_at IS NULL", model.LeaseStatusActive)
+	if ownerID != 0 {
+		query = query.Where("p.owner_id = ?", ownerID)
+	}
+	if managerID != 0 {
+		query = query.Where("p.manager_id = ?", managerID)
+	}
+	if propertyID != 0 {
+		query = query.Where("l.property_id = ?", propertyID)
+	}
+	var contacts []TenantContact
+	err := query.Order("p.name ASC, l.unit_number ASC, t.id ASC").Scan(&contacts).Error
+	return contacts, err
+}

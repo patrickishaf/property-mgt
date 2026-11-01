@@ -20,25 +20,41 @@ func QueueInviteEmail(cfg *config.AppConfig, jobRepo *repository.JobRepository, 
 		return "", err
 	}
 	link := cfg.WebAppURL + "/set-password?token=" + inviteToken
-	payload, err := json.Marshal(EmailJob{
-		Payload:   map[string]string{"firstName": actor.FirstName, "link": link},
-		Recipient: EmailRecipient{Address: actor.Email, Name: fullName},
-		Subject:   subject,
-		Type:      emailType,
+	_, err = QueueEmail(jobRepo, trx, EmailJob{
+		Payload:    map[string]string{"firstName": actor.FirstName, "link": link},
+		Recipients: []EmailRecipient{{Address: actor.Email, Name: fullName}},
+		Subject:    subject,
+		Type:       emailType,
 	})
 	if err != nil {
 		return "", err
 	}
+	return link, nil
+}
+
+// QueueEmail queues an email job inside the given transaction for the cpaas
+// worker to send.
+func QueueEmail(jobRepo *repository.JobRepository, trx *gorm.DB, email EmailJob) (*model.Job, error) {
+	return queueJob(jobRepo, trx, model.JobTypeEmail, email)
+}
+
+// QueueSMS queues an SMS job inside the given transaction for the cpaas worker
+// to send.
+func QueueSMS(jobRepo *repository.JobRepository, trx *gorm.DB, sms SMSJob) (*model.Job, error) {
+	return queueJob(jobRepo, trx, model.JobTypeSMS, sms)
+}
+
+func queueJob(jobRepo *repository.JobRepository, trx *gorm.DB, jobType model.JobType, payload any) (*model.Job, error) {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
 	now := time.Now()
-	_, err = jobRepo.SaveDefaultJobTRX(&model.Job{
+	return jobRepo.SaveDefaultJobTRX(&model.Job{
 		DueDate:         &now,
 		LastScheduledAt: now,
-		Payload:         string(payload),
+		Payload:         string(data),
 		Status:          common.ProcessingStatusPending.String(),
-		Type:            model.JobTypeEmail.String(),
+		Type:            jobType.String(),
 	}, trx)
-	if err != nil {
-		return "", err
-	}
-	return link, nil
 }

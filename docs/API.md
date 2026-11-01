@@ -67,6 +67,14 @@ Human-readable reference for the HTTP API. The machine-readable contract is [`op
   - [`GET /leases/installments`](#get-leasesinstallments) – list installments across leases
   - [`PATCH /leases/installments/{id}`](#patch-leasesinstallmentsid) – change an installment's due date
   - [`POST /leases/expiry/run`](#post-leasesexpiryrun) – run the expiry job (development only)
+- [Messages](#messages)
+  - [How messaging works](#how-messaging-works)
+  - [Objects](#message-object)
+  - [`GET /messages/recipients`](#get-messagesrecipients) – tenants you can message
+  - [`GET /messages/templates`](#get-messagestemplates) – built-in templates
+  - [`POST /messages`](#post-messages) – send a message
+  - [`GET /messages`](#get-messages) – sent messages, or a tenant's inbox
+  - [`GET /messages/{id}`](#get-messagesid) – one message
 
 ---
 
@@ -1695,3 +1703,221 @@ Change an installment's due date. Amounts can only change by setting a new sched
 **Development only** (registered when `APP_ENV=development`; no token required). Runs the daily expiry job immediately.
 
 **Response `200`** – `message: "expiry job ran"`, `data` is `{ "ended": <number of leases ended> }`.
+
+---
+
+## Messages
+
+All message endpoints require an access token.
+
+### How messaging works
+
+- Owners and managers send messages to tenants who have an **active lease** on properties they own or manage. Tenants read the messages sent to them.
+- Each message goes out on **one channel**:
+
+| Channel | Delivery |
+|---|---|
+| `in_app` | Delivered immediately to the tenant's inbox (`status: sent`, `deliveryStatus: delivered`) |
+| `sms` | Queued as one SMS job per recipient (`status: queued`, `deliveryStatus: queued`) |
+| `email` | Queued as one email job per recipient (`status: queued`, `deliveryStatus: queued`) |
+
+> **SMS and email are not delivered yet.** Jobs are queued for the cpaas worker, which isn't implemented; statuses stay `queued` until it is. Every message, whatever its channel, also appears in the tenant's inbox.
+
+- **Recipients:** the UI loads `GET /messages/recipients`, the user selects tenants (individually or in bulk – all tenants, tenants with overdue balances, everyone at a property), and the UI sends each selected tenant's ID and contact details with the message. The server checks that every tenant ID belongs to the caller, then delivers to the **contact details in the request**.
+- **Personalisation:** the subject and body may use `{name}`, `{unit}` and `{property}`. They are filled in separately for each recipient from the recipient's details (falling back to the tenant's active lease for unit and property). Senders see the text as written; each tenant sees their personalised copy.
+
+**Message statuses:** `sent` (in-app; delivered on save) or `queued` (SMS/email waiting for delivery). **Recipient delivery statuses:** `delivered` or `queued`.
+
+### Message object
+
+Returned to owners and managers.
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | integer | |
+| `channel` | string | `in_app`, `sms` or `email` |
+| `template` | string | Template key, or empty for a custom message |
+| `subject` | string | As written, with placeholders |
+| `body` | string | As written, with placeholders |
+| `status` | string | `sent` or `queued` |
+| `senderName` | string | |
+| `numberOfRecipients` | integer | |
+| `sentAt` | string | RFC 3339 |
+| `deliveredAt` | string \| null | Set for in-app messages; `null` until delivery for SMS/email |
+| `createdAt` | string | RFC 3339 |
+
+**Message detail** (`GET /messages/{id}` and `POST /messages`) adds `recipients`, each with `tenantId`, `fullName`, `email`, `phoneNumber`, `propertyId`, `propertyName`, `unitNumber` (as sent), `body` (personalised), `deliveryStatus` and `readAt` (string \| null).
+
+### Inbox message object
+
+Returned to tenants – their own copy of a message.
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | integer | Message ID |
+| `channel`, `template`, `senderName` | string | |
+| `subject`, `body` | string | Personalised for the tenant |
+| `sentAt` | string | RFC 3339 |
+| `readAt` | string \| null | Set the first time the tenant opens it |
+
+---
+
+### `GET /messages/recipients`
+
+Every tenant with an active lease on the caller's properties, for the recipient picker. **Not paginated.** Sorted by property name, then unit. **Auth:** owner or manager.
+
+**Query parameters:** `propertyId` (optional).
+
+**Response `200`** – `data` is an array:
+
+```json
+{
+  "status": "success",
+  "message": "",
+  "data": [
+    {
+      "id": 21,
+      "fullName": "Chika Okafor",
+      "email": "chika@example.com",
+      "phoneNumber": "08031234567",
+      "propertyId": 14,
+      "propertyName": "Parkview Residences",
+      "unitNumber": "A-01",
+      "hasOverdueBalance": true
+    }
+  ]
+}
+```
+
+`hasOverdueBalance` is `true` when the tenant's lease has an installment past its due date with money still owed or, for a lease **without installments**, when rent is still owed and the lease start date has passed.
+
+**Errors**
+
+| Status | `message` | When |
+|---|---|---|
+| 400 | `invalid request` | Query fails validation |
+| 403 | `invalid credentials` | Caller is a tenant |
+| 500 | `something went wrong` | |
+
+---
+
+### `GET /messages/templates`
+
+The built-in templates. Picking one pre-fills an editable subject and body. **Auth:** owner or manager.
+
+**Response `200`**
+
+```json
+{
+  "status": "success",
+  "message": "",
+  "data": {
+    "placeholders": ["{name}", "{unit}", "{property}"],
+    "templates": [
+      {
+        "key": "scheduled_maintenance",
+        "name": "Scheduled maintenance",
+        "subject": "Scheduled maintenance at {property}",
+        "body": "Dear {name}, maintenance work is scheduled at {property}. Access to some facilities near {unit} may be limited during this time."
+      }
+    ]
+  }
+}
+```
+
+Template keys: `general_notice`, `rent_increase`, `scheduled_maintenance`, `payment_reminder`.
+
+**Errors**
+
+| Status | `message` | When |
+|---|---|---|
+| 403 | `invalid credentials` | Caller is a tenant |
+
+---
+
+### `POST /messages`
+
+Send a message to selected tenants. Saves the message and one copy per recipient, and for SMS/email queues one job per recipient, in one transaction. **Auth:** owner or manager.
+
+**Request body**
+
+| Field | Type | Required | Rules |
+|---|---|---|---|
+| `channel` | string | yes | `in_app`, `sms` or `email` |
+| `template` | string | no | A template key; recorded on the message and supplies the default email subject |
+| `subject` | string | email without a template | Defaults to the template's subject; may use placeholders |
+| `body` | string | yes | May use placeholders |
+| `recipients` | array | yes | At least one; no tenant twice |
+| `recipients[].tenantId` | integer | yes | A tenant with an active lease on the caller's properties |
+| `recipients[].fullName` | string | yes | Used for `{name}` |
+| `recipients[].phoneNumber` | string | for `sms` | Delivered to as given |
+| `recipients[].email` | string | for `email` | Valid email; delivered to as given |
+| `recipients[].propertyId`, `propertyName`, `unitNumber` | | no | Used for `{property}`/`{unit}`; default to the tenant's active lease |
+
+```json
+{
+  "channel": "sms",
+  "template": "scheduled_maintenance",
+  "body": "Dear {name}, maintenance work is scheduled at {property}. Access to some facilities near {unit} may be limited during this time.",
+  "recipients": [
+    { "tenantId": 21, "fullName": "Chika Okafor", "phoneNumber": "08031234567", "propertyName": "Parkview Residences", "unitNumber": "A-01" },
+    { "tenantId": 22, "fullName": "Emeka Nwosu", "phoneNumber": "08039876543" }
+  ]
+}
+```
+
+**Response `201`** – `message: "message sent"`, `data` is a [message detail](#message-object).
+
+**Errors**
+
+| Status | `message` | When |
+|---|---|---|
+| 400 | `invalid request` | Body fails validation (including an unknown `channel` or empty `recipients`) |
+| 400 | `invalid recipients: <ids>` | Some tenants aren't on the caller's properties or have no active lease |
+| 400 | `duplicate recipient` | |
+| 400 | `unknown template` | |
+| 400 | `subject is required for email without a template` | |
+| 400 | `phone number is required for every recipient when sending by SMS` | |
+| 400 | `email is required for every recipient when sending by email` | |
+| 403 | `invalid credentials` | Caller is a tenant |
+| 500 | `something went wrong` | |
+
+---
+
+### `GET /messages`
+
+**Owners** see messages they or their managers sent; **managers** see messages they sent; **tenants** see their inbox. Newest first. **Auth:** any role.
+
+**Query parameters** – all optional.
+
+| Param | Type | Rules |
+|---|---|---|
+| `channel` | string | `in_app`, `sms` or `email` |
+| `template` | string | |
+| `from`, `to` | string | `YYYY-MM-DD`; sent on or after / on or before |
+| `unread` | boolean | Tenants only: only messages they haven't opened |
+| `page` | integer | default `1` |
+| `limit` | integer | default `10`, max `100` |
+
+**Response `200`** – `data` is a [paginated](#pagination) list of [Message](#message-object) for owners and managers, or [Inbox message](#inbox-message-object) for tenants.
+
+**Errors**
+
+| Status | `message` | When |
+|---|---|---|
+| 400 | `invalid request` | Query fails validation |
+| 500 | `something went wrong` | |
+
+---
+
+### `GET /messages/{id}`
+
+Owners and managers get the [message detail](#message-object) with every recipient's delivery status. Tenants get their [inbox copy](#inbox-message-object); the first time they open it, `readAt` is set. **Auth:** the sender (or their owner), or a recipient tenant.
+
+**Errors**
+
+| Status | `message` | When |
+|---|---|---|
+| 400 | `invalid request` | `id` is not a positive integer |
+| 404 | `message not found` | Doesn't exist or the caller can't see it |
+| 500 | `something went wrong` | |
