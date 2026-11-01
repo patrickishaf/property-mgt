@@ -48,13 +48,17 @@ func main() {
 	installmentRepo := repository.CreateInstallmentRepository(dbConn, logger)
 	paymentRepo := repository.CreatePaymentRepository(dbConn, logger)
 	messageRepo := repository.CreateMessageRepository(dbConn, logger)
+	complaintRepo := repository.CreateComplaintRepository(dbConn, logger)
+	complaintUpdateRepo := repository.CreateComplaintUpdateRepository(dbConn, logger)
+	issueRepo := repository.CreateIssueRepository(dbConn, logger)
+	issueUpdateRepo := repository.CreateIssueUpdateRepository(dbConn, logger)
 
 	// services
 	authService := auth.CreateService(&cfg.App, logger, adminRepo, tenantRepo)
 	leaseService := lease.CreateService(&cfg.App, logger, dbConn, leaseRepo, installmentRepo, tenantRepo, propertyRepo, unitRepo)
 	leaseService.RegisterExpiryJob(scheduler)
-	maintenanceService := maintenance.CreateService()
 	messagingService := messaging.CreateService(&cfg.App, logger, dbConn, messageRepo, leaseRepo, jobRepo)
+	maintenanceService := maintenance.CreateService(&cfg.App, logger, dbConn, complaintRepo, complaintUpdateRepo, issueRepo, issueUpdateRepo, leaseRepo, tenantRepo, propertyRepo, messagingService)
 	paymentService := payment.CreateService(&cfg.App, logger, dbConn, paymentRepo, installmentRepo, leaseRepo, propertyRepo, tenantRepo, bachsClient)
 	propertyService := property.CreateService(&cfg.App, logger, dbConn, propertyRepo, unitRepo, leaseRepo, adminRepo, jobRepo)
 	settingsService := settings.CreateService()
@@ -73,7 +77,7 @@ func main() {
 	// routers
 	authRouter := auth.CreateRouter(&cfg.App, authHTTPHandler, "/auth")
 	leaseRouter := lease.CreateRouter(&cfg.App, leaseHTTPHandler, "/leases")
-	maintenanceRouter := maintenance.CreateRouter(maintenanceHTTPHandler, "/maintenance")
+	maintenanceRouter := maintenance.CreateRouter(&cfg.App, maintenanceHTTPHandler, "/maintenance")
 	messagingRouter := messaging.CreateRouter(&cfg.App, messagingHTTPHandler, "/messages")
 	paymentRouter := payment.CreateRouter(&cfg.App, paymentHTTPHandler, "/payments")
 	propertyRouter := property.CreateRouter(&cfg.App, propertyHTTPHandler, "/properties")

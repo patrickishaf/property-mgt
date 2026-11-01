@@ -75,6 +75,20 @@ Human-readable reference for the HTTP API. The machine-readable contract is [`op
   - [`POST /messages`](#post-messages) – send a message
   - [`GET /messages`](#get-messages) – sent messages, or a tenant's inbox
   - [`GET /messages/{id}`](#get-messagesid) – one message
+- [Maintenance](#maintenance)
+  - [How maintenance works](#how-maintenance-works)
+  - [Objects](#complaint-object)
+  - [`POST /maintenance/complaints`](#post-maintenancecomplaints) – tenant files a complaint
+  - [`GET /maintenance/complaints`](#get-maintenancecomplaints) – list complaints
+  - [`GET /maintenance/complaints/linked`](#get-maintenancecomplaintslinked) – complaints linked to an issue
+  - [`GET /maintenance/complaints/{id}`](#get-maintenancecomplaintsid) – get a complaint
+  - [`GET /maintenance/complaints/{id}/updates`](#get-maintenancecomplaintsidupdates) – a complaint's timeline
+  - [`POST /maintenance/issues`](#post-maintenanceissues) – open an issue
+  - [`GET /maintenance/issues`](#get-maintenanceissues) – list issues
+  - [`GET /maintenance/issues/{id}`](#get-maintenanceissuesid) – get an issue
+  - [`POST /maintenance/issues/{id}/complaints`](#post-maintenanceissuesidcomplaints) – link complaints
+  - [`POST /maintenance/issues/{id}/updates`](#post-maintenanceissuesidupdates) – post an update and notify tenants
+  - [`GET /maintenance/issues/{id}/updates`](#get-maintenanceissuesidupdates) – an issue's updates
 
 ---
 
@@ -1921,3 +1935,340 @@ Owners and managers get the [message detail](#message-object) with every recipie
 | 400 | `invalid request` | `id` is not a positive integer |
 | 404 | `message not found` | Doesn't exist or the caller can't see it |
 | 500 | `something went wrong` | |
+
+---
+
+## Maintenance
+
+All maintenance endpoints require an access token.
+
+### How maintenance works
+
+- **Tenants file complaints** about problems in their unit. The property and unit are taken from the tenant's active lease. Complaints can't be edited or withdrawn.
+- **Owners and managers open issues** – maintenance jobs on a property – and link one or more complaints to each. An issue can also be opened with no complaints (e.g. a routine inspection). A complaint can be linked to one issue only, and only to an issue on its own property.
+- **Status flows from the issue.** Linking a complaint gives it the issue's status. Posting an issue update can change the issue's status, and every linked complaint gets the same status.
+- **Complaint timelines mirror the issue.** Linking adds a "being investigated" entry to the complaint's timeline; every issue update is copied onto the timeline of each linked complaint. Tenants follow progress through their complaint and its updates; issues themselves are visible to owners and managers only.
+- **Tenants are notified** of each issue update through [messaging](#messages) – on the channels requested, in-app by default.
+
+**Values**
+
+| Field | Values |
+|---|---|
+| `category` | `electrical`, `plumbing`, `structural`, `lighting`, `security`, `other` |
+| `urgency` | `low`, `normal`, `urgent` |
+| `status` | `open`, `in_progress`, `fixed` (any transition is allowed, so a fixed issue can be reopened) |
+
+**Access:** tenants see only their own complaints and get `403` on issue endpoints. Owners and managers see complaints and issues on properties they own or manage; anything else returns `404`.
+
+### Complaint object
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | integer | |
+| `message` | string | The tenant's description |
+| `category`, `urgency`, `status` | string | See values above |
+| `tenantId` | integer | |
+| `tenantFullName` | string | |
+| `propertyId` | integer | |
+| `unitNumber` | string | |
+| `issueId` | integer \| null | The issue it's linked to |
+| `createdAt` | string | RFC 3339 |
+
+`GET /maintenance/complaints/{id}` and `POST /maintenance/complaints` also return `issueTitle` (empty when unlinked).
+
+### Issue object
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | integer | |
+| `title`, `message` | string | |
+| `category`, `urgency`, `status` | string | See values above |
+| `propertyId` | integer | |
+| `creatorFullName` | string | Owner or manager who opened it |
+| `linkedComplaintCount` | integer | |
+| `createdAt` | string | RFC 3339 |
+
+Issue detail (`GET /maintenance/issues/{id}`, `POST /maintenance/issues`, `POST /maintenance/issues/{id}/complaints`) also returns `propertyName`.
+
+### Update object
+
+One entry in an issue's or a complaint's timeline.
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | integer | |
+| `message` | string | |
+| `status` | string | Status set by this update |
+| `creatorFullName` | string | |
+| `createdAt` | string | RFC 3339 |
+
+---
+
+### `POST /maintenance/complaints`
+
+File a complaint. **Auth:** tenant with an active lease.
+
+**Request body**
+
+| Field | Type | Required | Rules |
+|---|---|---|---|
+| `category` | string | yes | See values |
+| `urgency` | string | yes | See values |
+| `message` | string | yes | |
+
+```json
+{ "category": "plumbing", "urgency": "urgent", "message": "Kitchen tap is leaking" }
+```
+
+**Response `201`** – `message: "complaint created"`, `data` is a [Complaint](#complaint-object) with `status: "open"`.
+
+**Errors**
+
+| Status | `message` | When |
+|---|---|---|
+| 400 | `invalid request` | Body fails validation |
+| 403 | `invalid credentials` | Caller is not a tenant |
+| 404 | `no active lease` | |
+| 500 | `something went wrong` | |
+
+---
+
+### `GET /maintenance/complaints`
+
+List complaints, newest first. **Auth:** any role; tenants see their own, owners and managers see complaints on their properties.
+
+**Query parameters** – all optional.
+
+| Param | Type | Rules |
+|---|---|---|
+| `propertyId` | integer | |
+| `status`, `category`, `urgency` | string | See values |
+| `linked` | boolean | `true`: linked to an issue; `false`: not yet linked |
+| `page` | integer | default `1` |
+| `limit` | integer | default `10`, max `100` |
+
+**Response `200`** – `data` is a [paginated](#pagination) list of [Complaint](#complaint-object).
+
+**Errors**
+
+| Status | `message` | When |
+|---|---|---|
+| 400 | `invalid request` | Query fails validation |
+| 500 | `something went wrong` | |
+
+---
+
+### `GET /maintenance/complaints/linked`
+
+All complaints linked to an issue (not paginated). **Auth:** owner or manager of the issue's property.
+
+**Query parameters:** `issueId` (required).
+
+**Response `200`** – `data` is an array of [Complaint](#complaint-object).
+
+**Errors**
+
+| Status | `message` | When |
+|---|---|---|
+| 400 | `invalid request` | `issueId` missing |
+| 403 | `invalid credentials` | Caller is a tenant |
+| 404 | `issue not found` | |
+| 500 | `something went wrong` | |
+
+---
+
+### `GET /maintenance/complaints/{id}`
+
+Get one complaint. **Auth:** the tenant who filed it, or an owner/manager of its property.
+
+**Response `200`** – `data` is a [Complaint](#complaint-object) with `issueTitle`.
+
+**Errors**
+
+| Status | `message` | When |
+|---|---|---|
+| 400 | `invalid request` | `id` is not a positive integer |
+| 404 | `complaint not found` | |
+| 500 | `something went wrong` | |
+
+---
+
+### `GET /maintenance/complaints/{id}/updates`
+
+The complaint's timeline, oldest first (not paginated). **Auth:** as above.
+
+**Response `200`** – `data` is an array of [Update](#update-object).
+
+```json
+{
+  "status": "success",
+  "message": "",
+  "data": [
+    { "id": 1, "createdAt": "2026-11-01T10:02:00Z", "creatorFullName": "Adebayo Williams", "message": "Your complaint is being investigated as part of the issue \"Water system repair\".", "status": "open" },
+    { "id": 4, "createdAt": "2026-11-01T14:30:00Z", "creatorFullName": "Adebayo Williams", "message": "Plumber booked for Tuesday.", "status": "in_progress" }
+  ]
+}
+```
+
+**Errors:** as for `GET /maintenance/complaints/{id}`.
+
+---
+
+### `POST /maintenance/issues`
+
+Open an issue, optionally linking complaints. In one transaction: creates the issue (`open`) and links the complaints, which take its status and get a timeline entry. **Auth:** owner or manager of the property.
+
+**Request body**
+
+| Field | Type | Required | Rules |
+|---|---|---|---|
+| `title` | string | yes | |
+| `message` | string | yes | Description of the job |
+| `category`, `urgency` | string | yes | See values |
+| `propertyId` | integer | yes | A property the caller owns or manages |
+| `complaintIds` | integer[] | no | Complaints on that property not already linked to an issue |
+
+```json
+{
+  "title": "Water system repair",
+  "message": "Plumber to inspect the mains",
+  "category": "plumbing",
+  "urgency": "urgent",
+  "propertyId": 14,
+  "complaintIds": [31, 32]
+}
+```
+
+**Response `201`** – `message: "issue created"`, `data` is the issue detail.
+
+**Errors**
+
+| Status | `message` | When |
+|---|---|---|
+| 400 | `invalid request` | Body fails validation |
+| 400 | `invalid complaints: <ids>` | Unknown, on another property, or already linked |
+| 403 | `invalid credentials` | Caller is a tenant |
+| 404 | `property not found` | |
+| 500 | `something went wrong` | |
+
+---
+
+### `GET /maintenance/issues`
+
+List issues on the caller's properties, newest first. **Auth:** owner or manager.
+
+**Query parameters:** `propertyId`, `status`, `category`, `urgency`, `page`, `limit` (default `10`, max `100`) – all optional.
+
+**Response `200`** – `data` is a paginated list of [Issue](#issue-object).
+
+**Errors**
+
+| Status | `message` | When |
+|---|---|---|
+| 400 | `invalid request` | Query fails validation |
+| 403 | `invalid credentials` | Caller is a tenant |
+| 500 | `something went wrong` | |
+
+---
+
+### `GET /maintenance/issues/{id}`
+
+Get one issue. **Auth:** owner or manager of its property.
+
+**Response `200`** – `data` is the issue detail (with `propertyName`).
+
+**Errors**
+
+| Status | `message` | When |
+|---|---|---|
+| 400 | `invalid request` | `id` is not a positive integer |
+| 403 | `invalid credentials` | Caller is a tenant |
+| 404 | `issue not found` | |
+| 500 | `something went wrong` | |
+
+---
+
+### `POST /maintenance/issues/{id}/complaints`
+
+Link more complaints to an issue. They take the issue's current status and get a timeline entry. **Auth:** owner or manager of the issue's property.
+
+**Request body**
+
+| Field | Type | Required | Rules |
+|---|---|---|---|
+| `complaintIds` | integer[] | yes | At least one; on the issue's property and not already linked |
+
+**Response `200`** – `message: "complaints linked"`, `data` is the updated issue detail.
+
+**Errors**
+
+| Status | `message` | When |
+|---|---|---|
+| 400 | `invalid request` | `id` or body fails validation |
+| 400 | `invalid complaints: <ids>` | |
+| 403 | `invalid credentials` | Caller is a tenant |
+| 404 | `issue not found` | |
+| 500 | `something went wrong` | |
+
+---
+
+### `POST /maintenance/issues/{id}/updates`
+
+Post an update on an issue and notify the tenants with linked complaints. In one transaction: saves the update, sets the issue's status, sets every linked complaint to the same status, and copies the update onto each complaint's timeline. After it's saved, one message per channel is sent to the tenants with linked complaints (each tenant once), from the poster, using the tenants' stored email and phone number. **Auth:** owner or manager of the issue's property.
+
+**Request body**
+
+| Field | Type | Required | Rules |
+|---|---|---|---|
+| `message` | string | yes | |
+| `status` | string | no | See values; keeps the current status if omitted |
+| `notifyChannels` | string[] | no | Any of `in_app`, `sms`, `email`. **Missing or empty means `["in_app"]`.** Duplicates are ignored |
+
+```json
+{ "message": "Plumber booked for Tuesday.", "status": "in_progress", "notifyChannels": ["in_app", "sms"] }
+```
+
+The notification has the subject `Update on: <title>` and a body naming the issue, the update message and the new status, personalised for each tenant. SMS and email are queued (see [Messages](#messages)); tenants without a phone number (SMS) or email (email) are skipped for that channel.
+
+**Response `201`** – `message: "issue updated"`.
+
+```json
+{
+  "status": "success",
+  "message": "issue updated",
+  "data": {
+    "update": { "id": 7, "createdAt": "2026-11-01T14:30:00Z", "creatorFullName": "Adebayo Williams", "message": "Plumber booked for Tuesday.", "status": "in_progress" },
+    "notifications": [
+      { "channel": "in_app", "messageId": 41, "recipients": 3, "skipped": 0 },
+      { "channel": "sms", "messageId": 42, "recipients": 2, "skipped": 1 }
+    ]
+  }
+}
+```
+
+| `notifications[]` field | Description |
+|---|---|
+| `channel` | |
+| `messageId` | The message created, or `null` if nobody could be reached or sending failed |
+| `recipients` | Tenants the message was sent to |
+| `skipped` | Tenants without the contact detail the channel needs |
+| `error` | Present only if sending failed; the update itself is still saved |
+
+**Errors**
+
+| Status | `message` | When |
+|---|---|---|
+| 400 | `invalid request` | `id` or body fails validation (including an unknown status or channel) |
+| 403 | `invalid credentials` | Caller is a tenant |
+| 404 | `issue not found` | |
+| 500 | `something went wrong` | |
+
+---
+
+### `GET /maintenance/issues/{id}/updates`
+
+The issue's updates, oldest first (not paginated). **Auth:** owner or manager of its property.
+
+**Response `200`** – `data` is an array of [Update](#update-object).
+
+**Errors:** as for `GET /maintenance/issues/{id}`.

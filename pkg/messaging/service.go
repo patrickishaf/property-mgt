@@ -153,16 +153,53 @@ func checkSendRequest(dto sendMessageReq) (string, *common.ServiceResponse) {
 	return subject, nil
 }
 
-// sender identifies who a message is from; a nil ID is the system.
-type sender struct {
+// Sender identifies who a message is from; a nil ID is the system.
+type Sender struct {
 	ID   *uint
 	Name string
+}
+
+// Recipient is a tenant a message is sent to, with the contact details and
+// property/unit used for delivery and personalisation.
+type Recipient struct {
+	Email        string
+	FullName     string
+	PhoneNumber  string
+	PropertyID   uint
+	PropertyName string
+	TenantID     uint
+	UnitNumber   string
+}
+
+// Send sends a message on one channel for another module (e.g. maintenance),
+// sharing personalisation and job queueing with the HTTP endpoint. Callers are
+// responsible for choosing recipients they may message. It returns the new
+// message's ID.
+func (this *service) Send(from Sender, channel string, templateKey string, subject string, body string, recipients []Recipient) (uint, error) {
+	copies := make([]model.MessageRecipient, 0, len(recipients))
+	for _, r := range recipients {
+		copies = append(copies, model.MessageRecipient{
+			Body:         personalise(body, r.FullName, r.UnitNumber, r.PropertyName),
+			Email:        r.Email,
+			FullName:     r.FullName,
+			PhoneNumber:  r.PhoneNumber,
+			PropertyID:   int(r.PropertyID),
+			PropertyName: r.PropertyName,
+			TenantID:     int(r.TenantID),
+			UnitNumber:   r.UnitNumber,
+		})
+	}
+	message, err := this.send(from, channel, templateKey, subject, body, copies)
+	if err != nil {
+		return 0, err
+	}
+	return message.ID, nil
 }
 
 // send saves a message and its recipients and, for SMS and email, queues one
 // job per recipient, all in one transaction. Recipients must already be
 // validated. Other modules (e.g. maintenance) can reuse it with a system sender.
-func (this *service) send(from sender, channel string, templateKey string, subject string, body string, recipients []model.MessageRecipient) (*model.Message, error) {
+func (this *service) send(from Sender, channel string, templateKey string, subject string, body string, recipients []model.MessageRecipient) (*model.Message, error) {
 	now := time.Now()
 	message := model.Message{
 		Body:               body,
@@ -291,8 +328,17 @@ func (this *service) sendMessage(actor *common.Actor, dto sendMessageReq) common
 	}
 
 	senderID := actor.ID
-	message, err := this.send(sender{ID: &senderID, Name: actor.FirstName + " " + actor.LastName},
-		dto.Channel, dto.Template, subject, dto.Body, recipients)
+	message, err := this.send(
+		Sender{
+			ID:   &senderID,
+			Name: actor.FirstName + " " + actor.LastName,
+		},
+		dto.Channel,
+		dto.Template,
+		subject,
+		dto.Body,
+		recipients,
+	)
 	if err != nil {
 		logger.Error("failed to send message", "err", err.Error())
 		return serverError()

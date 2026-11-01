@@ -31,6 +31,8 @@ tags:
     description: Leases, their lifecycle and installment schedules
   - name: Messages
     description: Messages from owners and managers to tenants
+  - name: Maintenance
+    description: Tenant complaints and the maintenance issues they're linked to
 
 paths:
   /auth/accounts:
@@ -1998,6 +2000,526 @@ paths:
         '500':
           $ref: '#/components/responses/ServerError'
 
+  /maintenance/complaints:
+    post:
+      tags: [Maintenance]
+      operationId: createComplaint
+      summary: File a complaint
+      description: Tenant only. Property and unit come from the tenant's active lease.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateComplaintRequest'
+      responses:
+        '201':
+          description: Complaint created (`message` is `complaint created`).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ComplaintDetail'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: '`no active lease`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/ServerError'
+    get:
+      tags: [Maintenance]
+      operationId: getComplaints
+      summary: List complaints
+      description: Tenants see their own; owners and managers see complaints on their properties. Newest first.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: propertyId
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [open, in_progress, fixed]
+        - name: category
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [electrical, plumbing, structural, lighting, security, other]
+        - name: urgency
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [low, normal, urgent]
+        - name: linked
+          in: query
+          required: false
+          schema:
+            type: boolean
+        - $ref: '#/components/parameters/Page'
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+      responses:
+        '200':
+          description: A page of complaints.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ComplaintList'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /maintenance/complaints/linked:
+    get:
+      tags: [Maintenance]
+      operationId: getLinkedComplaints
+      summary: Complaints linked to an issue
+      description: Owner or manager of the issue's property. Not paginated.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: issueId
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        '200':
+          description: The linked complaints.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Complaint'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: '`issue not found`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /maintenance/complaints/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Complaint ID
+        schema:
+          type: integer
+          minimum: 1
+    get:
+      tags: [Maintenance]
+      operationId: getComplaintInfo
+      summary: Get a complaint
+      description: The tenant who filed it, or an owner/manager of its property.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: The complaint.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ComplaintDetail'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: '`complaint not found`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /maintenance/complaints/{id}/updates:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Complaint ID
+        schema:
+          type: integer
+          minimum: 1
+    get:
+      tags: [Maintenance]
+      operationId: getComplaintUpdates
+      summary: A complaint's timeline
+      description: Oldest first; mirrors the linked issue's updates.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: The timeline.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/MaintenanceUpdate'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: '`complaint not found`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /maintenance/issues:
+    post:
+      tags: [Maintenance]
+      operationId: createIssue
+      summary: Open an issue
+      description: |
+        Owner or manager of the property. Optionally links complaints (same property, not already linked), which
+        take the issue's status and get a timeline entry.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateIssueRequest'
+      responses:
+        '201':
+          description: Issue created (`message` is `issue created`).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/IssueDetail'
+        '400':
+          description: '`invalid request` or `invalid complaints: <ids>`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/PropertyNotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+    get:
+      tags: [Maintenance]
+      operationId: getIssues
+      summary: List issues
+      description: Owner or manager. Issues on the caller's properties, newest first.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: propertyId
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [open, in_progress, fixed]
+        - name: category
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [electrical, plumbing, structural, lighting, security, other]
+        - name: urgency
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [low, normal, urgent]
+        - $ref: '#/components/parameters/Page'
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+      responses:
+        '200':
+          description: A page of issues.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/IssueList'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /maintenance/issues/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Issue ID
+        schema:
+          type: integer
+          minimum: 1
+    get:
+      tags: [Maintenance]
+      operationId: getIssueInfo
+      summary: Get an issue
+      description: Owner or manager of its property.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: The issue.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/IssueDetail'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: '`issue not found`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /maintenance/issues/{id}/complaints:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Issue ID
+        schema:
+          type: integer
+          minimum: 1
+    post:
+      tags: [Maintenance]
+      operationId: linkComplaints
+      summary: Link complaints to an issue
+      description: Owner or manager. Complaints take the issue's status and get a timeline entry.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LinkComplaintsRequest'
+      responses:
+        '200':
+          description: The updated issue (`message` is `complaints linked`).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/IssueDetail'
+        '400':
+          description: '`invalid request` or `invalid complaints: <ids>`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: '`issue not found`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /maintenance/issues/{id}/updates:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Issue ID
+        schema:
+          type: integer
+          minimum: 1
+    post:
+      tags: [Maintenance]
+      operationId: postIssueUpdate
+      summary: Post an issue update
+      description: |
+        Owner or manager. Sets the issue's status (kept if omitted) and every linked complaint's status, copies the
+        update onto each complaint's timeline, then notifies the tenants with linked complaints on each channel in
+        notifyChannels (in_app when missing or empty).
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PostIssueUpdateRequest'
+      responses:
+        '201':
+          description: Update posted (`message` is `issue updated`).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/PostIssueUpdateResult'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: '`issue not found`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/ServerError'
+    get:
+      tags: [Maintenance]
+      operationId: getIssueUpdates
+      summary: An issue's updates
+      description: Owner or manager. Oldest first.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: The updates.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/MaintenanceUpdate'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: '`issue not found`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
 components:
   securitySchemes:
     bearerAuth:
@@ -3214,3 +3736,225 @@ components:
           type: integer
         total:
           type: integer
+
+    Complaint:
+      type: object
+      required: [id, category, createdAt, issueId, message, propertyId, status, tenantFullName, tenantId, unitNumber, urgency]
+      properties:
+        id:
+          type: integer
+        category:
+          type: string
+          enum: [electrical, plumbing, structural, lighting, security, other]
+        createdAt:
+          type: string
+          format: date-time
+        issueId:
+          type: [integer, 'null']
+        message:
+          type: string
+        propertyId:
+          type: integer
+        status:
+          type: string
+          enum: [open, in_progress, fixed]
+        tenantFullName:
+          type: string
+        tenantId:
+          type: integer
+        unitNumber:
+          type: string
+        urgency:
+          type: string
+          enum: [low, normal, urgent]
+
+    ComplaintDetail:
+      allOf:
+        - $ref: '#/components/schemas/Complaint'
+        - type: object
+          required: [issueTitle]
+          properties:
+            issueTitle:
+              type: string
+              description: Empty when not linked.
+
+    Issue:
+      type: object
+      required: [id, category, createdAt, creatorFullName, linkedComplaintCount, message, propertyId, status, title, urgency]
+      properties:
+        id:
+          type: integer
+        category:
+          type: string
+          enum: [electrical, plumbing, structural, lighting, security, other]
+        createdAt:
+          type: string
+          format: date-time
+        creatorFullName:
+          type: string
+        linkedComplaintCount:
+          type: integer
+        message:
+          type: string
+        propertyId:
+          type: integer
+        status:
+          type: string
+          enum: [open, in_progress, fixed]
+        title:
+          type: string
+        urgency:
+          type: string
+          enum: [low, normal, urgent]
+
+    IssueDetail:
+      allOf:
+        - $ref: '#/components/schemas/Issue'
+        - type: object
+          required: [propertyName]
+          properties:
+            propertyName:
+              type: string
+
+    MaintenanceUpdate:
+      type: object
+      required: [id, createdAt, creatorFullName, message, status]
+      properties:
+        id:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        creatorFullName:
+          type: string
+        message:
+          type: string
+        status:
+          type: string
+          enum: [open, in_progress, fixed]
+
+    IssueNotification:
+      type: object
+      required: [channel, messageId, recipients, skipped]
+      properties:
+        channel:
+          type: string
+          enum: [in_app, sms, email]
+        messageId:
+          type: [integer, 'null']
+        recipients:
+          type: integer
+        skipped:
+          type: integer
+          description: Tenants without the phone number or email the channel needs.
+        error:
+          type: string
+          description: Present only if sending failed; the update is still saved.
+
+    PostIssueUpdateResult:
+      type: object
+      required: [update, notifications]
+      properties:
+        update:
+          $ref: '#/components/schemas/MaintenanceUpdate'
+        notifications:
+          type: array
+          items:
+            $ref: '#/components/schemas/IssueNotification'
+
+    ComplaintList:
+      type: object
+      required: [items, page, limit, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Complaint'
+        page:
+          type: integer
+        limit:
+          type: integer
+        total:
+          type: integer
+
+    IssueList:
+      type: object
+      required: [items, page, limit, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Issue'
+        page:
+          type: integer
+        limit:
+          type: integer
+        total:
+          type: integer
+
+    CreateComplaintRequest:
+      type: object
+      required: [category, urgency, message]
+      properties:
+        category:
+          type: string
+          enum: [electrical, plumbing, structural, lighting, security, other]
+        urgency:
+          type: string
+          enum: [low, normal, urgent]
+        message:
+          type: string
+          minLength: 1
+
+    CreateIssueRequest:
+      type: object
+      required: [title, message, category, urgency, propertyId]
+      properties:
+        title:
+          type: string
+          minLength: 1
+        message:
+          type: string
+          minLength: 1
+        category:
+          type: string
+          enum: [electrical, plumbing, structural, lighting, security, other]
+        urgency:
+          type: string
+          enum: [low, normal, urgent]
+        propertyId:
+          type: integer
+          minimum: 1
+        complaintIds:
+          type: array
+          items:
+            type: integer
+            minimum: 1
+
+    LinkComplaintsRequest:
+      type: object
+      required: [complaintIds]
+      properties:
+        complaintIds:
+          type: array
+          minItems: 1
+          items:
+            type: integer
+            minimum: 1
+
+    PostIssueUpdateRequest:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+          minLength: 1
+        status:
+          type: string
+          enum: [open, in_progress, fixed]
+        notifyChannels:
+          type: array
+          description: Defaults to [in_app] when missing or empty.
+          items:
+            type: string
+            enum: [in_app, sms, email]
