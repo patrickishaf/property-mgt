@@ -1,4 +1,4 @@
-.PHONY: run dev build build-macos build-linux demo
+.PHONY: run dev build build-macos build-linux demo seed
 
 AIR ?= $(shell command -v air 2>/dev/null || echo "$$(go env GOPATH)/bin/air")
 
@@ -22,3 +22,7 @@ build-linux:
 
 demo:
 	go run cmd/test/main.go
+
+# Rebuilds the development seed data through the running API (start `make dev` first).
+seed:
+	go run ./cmd/seed

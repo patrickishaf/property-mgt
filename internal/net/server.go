@@ -34,7 +34,10 @@ func (this *Server) GetAddr() string {
 
 func (this *Server) ConfigureMidleware(middlewares []Middleware) {
 	this.handler.Use(gin.Recovery())
-	this.handler.Use(cors.Default())
+	corsCfg := cors.DefaultConfig()
+	corsCfg.AllowAllOrigins = true
+	corsCfg.AddAllowHeaders("Authorization")
+	this.handler.Use(cors.New(corsCfg))
 	for _, mdlwr := range middlewares {
 		this.handler.Use(mdlwr())
 	}

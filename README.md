@@ -72,8 +72,21 @@ make dev          # run with hot reload (Air)
 make run          # run once
 make build        # build ./bin/app
 make build-linux  # build a linux/amd64 binary in ./bin/linux
+make seed         # rebuild the development seed data (needs the API running)
 go test ./...     # unit tests
 ```
+
+### Seed data
+
+`make seed` fills the database with a realistic portfolio that mirrors the web client's demo data, so each screen has something to show while it is wired to the API. Start the API first (`make dev`); the seed runs only when `APP_ENV=development`.
+
+- **Accounts:** one owner, two managers (two properties each) and sixteen tenants, four per property. Every seed account uses an `@seed.aventra.test` email and the password `aventra-dev-123`. The owner is `owner@seed.aventra.test`, and the managers are `tolu@` and `chidinma@`. The run prints every tenant's email and unit at the end.
+- **Rent:** annual leases that began nine months before the run date, most split into quarterly installments. The payments leave a mix of paid, partly paid, overdue and upcoming rent. There is also one lease starting in three weeks and one ended lease that still has a balance.
+- **Messages and maintenance:** in-app messages from the owner and both managers, plus five complaints. Three issues are linked to some of those complaints, and they have updates.
+- **How it works:** the seed calls the running API, so every record goes through the same validation and business rules as the web client's requests. Dates are worked out from the day it runs.
+- **Running it again:** each run first deletes everything a previous run created (found by the seed email domain), plus any emails it queued. Your own accounts and data are left alone.
+
+The dataset itself lives in [cmd/seed/data.go](cmd/seed/data.go).
 
 ## API documentation
 
