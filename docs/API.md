@@ -21,6 +21,8 @@ Human-readable reference for the HTTP API. The machine-readable contract is [`op
   - [`PATCH /auth/user`](#patch-authuser) – update your own name and phone
   - [`POST /auth/token/refresh`](#post-authtokenrefresh) – new access token
   - [`POST /auth/password/set`](#post-authpasswordset) – invited tenant or manager sets password
+  - [`POST /auth/password/forgot`](#post-authpasswordforgot) – email a password reset link
+  - [`POST /auth/password/reset`](#post-authpasswordreset) – choose a new password from a reset link
 - [Tenants](#tenants)
   - [Access rules](#access-rules)
   - [Onboarding flow](#onboarding-flow)
@@ -71,6 +73,7 @@ Human-readable reference for the HTTP API. The machine-readable contract is [`op
   - [`GET /leases/installments`](#get-leasesinstallments) – list installments across leases
   - [`PATCH /leases/installments/{id}`](#patch-leasesinstallmentsid) – change an installment's due date
   - [`POST /leases/expiry/run`](#post-leasesexpiryrun) – run the expiry job (development only)
+  - [`POST /leases/reminders/run`](#post-leasesremindersrun) – send today's tenant reminders (development only)
 - [Messages](#messages)
   - [How messaging works](#how-messaging-works)
   - [Objects](#message-object)
@@ -165,9 +168,18 @@ Error example:
 | 403 | Authenticated, but the role is not allowed to perform this action |
 | 404 | Resource does not exist **or** the caller is not allowed to see it (the API does not distinguish) |
 | 409 | Conflict with existing data (duplicate email, occupied unit, …) |
+| 429 | Too many attempts (`message: "request rate limited"`): see [Rate limits](#rate-limits) |
 | 500 | Unexpected server error (`message: "something went wrong"`) |
 
 Validation failures always return `400` with `message: "invalid request"`; field-level details are not returned.
+
+### Rate limits
+
+`POST /auth/login`, `POST /auth/password/forgot` and `POST /auth/password/reset` each allow **5 requests a minute per IP address** (bursts of up to 5, refilling one every 12 seconds). Each endpoint has its own budget. Over the limit, they answer `429` with `message: "request rate limited"`.
+
+### Browser access (CORS)
+
+Browsers may call the API only from the origins listed in `ALLOWED_ORIGINS` (comma-separated, e.g. `https://app.example.com,http://localhost:8082`; `*` allows any). If it's empty, development allows any origin and other environments allow none.
 
 ### Pagination
 
@@ -481,6 +493,59 @@ A newly invited tenant or property manager sets their password using the token f
 | 400 | `invalid request` | Body fails validation |
 | 401 | `invalid token` | Token invalid, expired, not an invite token, or the invited user no longer exists |
 | 409 | `password already set` | The invite was already used |
+| 500 | `something went wrong` | |
+
+---
+
+### `POST /auth/password/forgot`
+
+Email a password reset link. Works for every role. **Auth:** none. Rate limited (see [Rate limits](#rate-limits)).
+
+**Request body**
+
+| Field | Type | Required | Rules |
+|---|---|---|---|
+| `email` | string | yes | Valid email |
+| `accountType` | string | yes | `tenant` or `admin` (owners and property managers) |
+
+```json
+{ "email": "ada@example.com", "accountType": "tenant" }
+```
+
+**Response `200`** – `message: "if an account uses that email, a reset link is on its way"`, `data` is `null`. The response is the same whether or not the account exists, so it can't be used to find out which emails have accounts.
+
+If the account exists, an email (type `password_reset`, payload `firstName` and `link`) is queued for the email worker, linking to `<WEB_APP_URL>/reset-password?token=<resetToken>`. The link expires after `PASSWORD_RESET_EXPIRATION_SECONDS` and stops working once the password changes, so it can be used once. In development the link is also written to the server log.
+
+**Errors**
+
+| Status | `message` | When |
+|---|---|---|
+| 400 | `invalid request` | Body fails validation |
+| 429 | `request rate limited` | |
+| 500 | `something went wrong` | |
+
+---
+
+### `POST /auth/password/reset`
+
+Set a new password from a reset link and log in. **Auth:** none (the reset token is in the body). Rate limited (see [Rate limits](#rate-limits)).
+
+**Request body**
+
+| Field | Type | Required | Rules |
+|---|---|---|---|
+| `token` | string | yes | The `token` query parameter from the reset link |
+| `password` | string | yes | Min 8 characters |
+
+**Response `200`** – `message: "password reset"`, `data` is `{ "accessToken", "refreshToken" }` as for [`POST /auth/login`](#post-authlogin).
+
+**Errors**
+
+| Status | `message` | When |
+|---|---|---|
+| 400 | `invalid request` | Body fails validation |
+| 401 | `invalid token` | Token invalid, expired, not a reset token, already used (the password has changed since it was issued), or the account no longer exists |
+| 429 | `request rate limited` | |
 | 500 | `something went wrong` | |
 
 ---
@@ -1918,6 +1983,24 @@ Change an installment's due date. Amounts can only change by setting a new sched
 **Development only** (registered when `APP_ENV=development`; no token required). Runs the daily expiry job immediately.
 
 **Response `200`** – `message: "expiry job ran"`, `data` is `{ "ended": <number of leases ended> }`.
+
+---
+
+### `POST /leases/reminders/run`
+
+**Development only** (registered when `APP_ENV=development`; no token required). Sends today's tenant reminders immediately, as the daily reminder job does at 09:00 Lagos time.
+
+**What the job sends** (on the property owner's behalf, as sender "Aventra reminders", so owners see them in their sent messages; tenants see them in their inbox):
+
+| Reminder | Channel | When |
+|---|---|---|
+| Lease ending soon | in-app | Once each at 30, 14 and 7 days before an active lease's end date |
+| Overdue rent | SMS (queued) | When a lease has rent past its due date with money owed (the same rule as [due items](#get-leasesdue)), then weekly while it stays overdue |
+| Lease expired | SMS (queued) | When a lease has ended on or after its end date and the tenant has no newer active lease: on expiry, then weekly, at most 4 times within 4 weeks |
+
+Each reminder sent is recorded, so a reminder is never sent twice. Tenants without a phone number are skipped for SMS reminders.
+
+**Response `200`** – `message: "reminders sent"`, `data` is `{ "expiring": n, "overdue": n, "expired": n, "skipped": n }`.
 
 ---
 

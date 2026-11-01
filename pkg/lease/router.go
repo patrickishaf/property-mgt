@@ -29,6 +29,7 @@ func (this *router) RegisterRoutes(router *gin.RouterGroup) {
 	// not authenticated and only exists in development.
 	if this.cfg.Env == "development" {
 		router.POST("/expiry/run", this.http.runExpiry)
+		router.POST("/reminders/run", this.http.runReminders)
 	}
 
 	authed := router.Group("", net.VerifyJWT(this.cfg.JWTSecretKey))

@@ -7,7 +7,6 @@ import (
 
 	"github.com/patrickishaf/property-mgt/common"
 	"github.com/patrickishaf/property-mgt/config"
-	"github.com/patrickishaf/property-mgt/internal/cache"
 	"github.com/patrickishaf/property-mgt/internal/db"
 	"github.com/patrickishaf/property-mgt/internal/db/repository"
 	"github.com/patrickishaf/property-mgt/internal/net"
@@ -28,7 +27,6 @@ func main() {
 	cfg := config.LoadConfig()
 	logger := common.CreateLogger()
 	dbConn := db.Connect(&cfg.DB)
-	cacheClient := cache.CreateClient(&cfg.Redis)
 	scheduler := common.CreateScheduler()
 
 	// bachs
@@ -42,6 +40,7 @@ func main() {
 	adminRepo := repository.CreateAdminRepository(dbConn, logger)
 	jobRepo := repository.CreateJobRepository(&cfg.App, dbConn, logger)
 	leaseRepo := repository.CreateLeaseRepo(dbConn, logger)
+	leaseReminderRepo := repository.CreateLeaseReminderRepository(dbConn, logger)
 	propertyRepo := repository.CreatePropertyRepository(dbConn, logger)
 	tenantRepo := repository.CreateTenantRepository(dbConn, logger)
 	unitRepo := repository.CreateUnitRepository(dbConn, logger)
@@ -54,10 +53,11 @@ func main() {
 	issueUpdateRepo := repository.CreateIssueUpdateRepository(dbConn, logger)
 
 	// services
-	authService := auth.CreateService(&cfg.App, logger, adminRepo, tenantRepo)
-	leaseService := lease.CreateService(&cfg.App, logger, dbConn, leaseRepo, installmentRepo, tenantRepo, propertyRepo, unitRepo)
+	authService := auth.CreateService(&cfg.App, logger, dbConn, adminRepo, tenantRepo, jobRepo)
+	leaseService := lease.CreateService(&cfg.App, logger, dbConn, leaseRepo, installmentRepo, tenantRepo, propertyRepo, unitRepo, leaseReminderRepo)
 	leaseService.RegisterExpiryJob(scheduler)
 	messagingService := messaging.CreateService(&cfg.App, logger, dbConn, messageRepo, leaseRepo, jobRepo)
+	leaseService.RegisterReminderJob(scheduler, messagingService)
 	maintenanceService := maintenance.CreateService(&cfg.App, logger, dbConn, complaintRepo, complaintUpdateRepo, issueRepo, issueUpdateRepo, leaseRepo, tenantRepo, propertyRepo, messagingService)
 	paymentService := payment.CreateService(&cfg.App, logger, dbConn, paymentRepo, installmentRepo, leaseRepo, propertyRepo, tenantRepo, bachsClient)
 	propertyService := property.CreateService(&cfg.App, logger, dbConn, propertyRepo, unitRepo, leaseRepo, adminRepo, jobRepo)
@@ -81,7 +81,7 @@ func main() {
 	messagingRouter := messaging.CreateRouter(&cfg.App, messagingHTTPHandler, "/messages")
 	paymentRouter := payment.CreateRouter(&cfg.App, paymentHTTPHandler, "/payments")
 	propertyRouter := property.CreateRouter(&cfg.App, propertyHTTPHandler, "/properties")
-	settingsRouter := settings.CreateRouter(settingsHTTPHandler, "/settings")
+	settingsRouter := settings.CreateRouter(&cfg.App, settingsHTTPHandler, "/settings")
 	tenantRouter := tenant.CreateRouter(&cfg.App, tenantHTTPHandler, "/tenants")
 
 	srv := net.CreateServer(&cfg.App)
@@ -109,7 +109,6 @@ func main() {
 	<-exitChan
 	logger.Debug("interrupt signal received. shutting down system")
 	scheduler.Stop()
-	cacheClient.Client().Close()
 	db.CloseDB()
 	os.Exit(0)
 }

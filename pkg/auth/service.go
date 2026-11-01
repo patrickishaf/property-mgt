@@ -11,20 +11,26 @@ import (
 	"github.com/patrickishaf/property-mgt/config"
 	"github.com/patrickishaf/property-mgt/internal/db/model"
 	"github.com/patrickishaf/property-mgt/internal/db/repository"
+	"gorm.io/gorm"
 )
 
 type service struct {
 	adminRepo  *repository.AdminRepository
 	cfg        *config.AppConfig
+	db         *gorm.DB
+	jobRepo    *repository.JobRepository
 	logger     *slog.Logger
 	tenantRepo *repository.TenantRepository
 }
 
-func CreateService(cfg *config.AppConfig, logger *slog.Logger, adminRepo *repository.AdminRepository, tenantRepo *repository.TenantRepository,
+func CreateService(cfg *config.AppConfig, logger *slog.Logger, db *gorm.DB, adminRepo *repository.AdminRepository, tenantRepo *repository.TenantRepository,
+	jobRepo *repository.JobRepository,
 ) *service {
 	return &service{
 		adminRepo:  adminRepo,
 		cfg:        cfg,
+		db:         db,
+		jobRepo:    jobRepo,
 		logger:     logger,
 		tenantRepo: tenantRepo,
 	}

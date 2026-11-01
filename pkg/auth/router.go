@@ -28,7 +28,10 @@ func (this *router) RegisterRoutes(router *gin.RouterGroup) {
 	router.POST("/accounts", this.http.createOwnerAccount)
 	router.GET("/user", net.VerifyJWT(this.cfg.JWTSecretKey), this.http.getAuthenticatedUser)
 	router.PATCH("/user", net.VerifyJWT(this.cfg.JWTSecretKey), this.http.updateAuthenticatedUser)
-	router.POST("/login", this.http.loginWithPassword)
+	// Each guarded endpoint allows 5 attempts a minute per IP address.
+	router.POST("/login", net.RateLimitByIPAddress("login", 5, 5), this.http.loginWithPassword)
+	router.POST("/password/forgot", net.RateLimitByIPAddress("password-forgot", 5, 5), this.http.forgotPassword)
+	router.POST("/password/reset", net.RateLimitByIPAddress("password-reset", 5, 5), this.http.resetPassword)
 	router.POST("/token/refresh", this.http.refreshAuthToken)
 	router.POST("/password/set", this.http.setPassword)
 }

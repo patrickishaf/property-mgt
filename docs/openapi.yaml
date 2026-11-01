@@ -101,6 +101,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+        '429':
+          description: '`request rate limited`: more than 5 requests a minute from this IP'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
         '500':
           $ref: '#/components/responses/ServerError'
 
@@ -268,6 +274,95 @@ paths:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '409':
           description: '`password already set` (the invite was already used)'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /auth/password/forgot:
+    post:
+      tags: [Auth]
+      operationId: forgotPassword
+      summary: Email a password reset link
+      description: |
+        Any role. Answers the same whether or not the account exists. If it does, queues an email linking to
+        `<WEB_APP_URL>/reset-password?token=<resetToken>`, valid for `PASSWORD_RESET_EXPIRATION_SECONDS` and
+        only until the password changes. Rate limited to 5 requests a minute per IP.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, accountType]
+              properties:
+                email:
+                  type: string
+                  format: email
+                accountType:
+                  type: string
+                  enum: [tenant, admin]
+      responses:
+        '200':
+          description: '`if an account uses that email, a reset link is on its way` (data is null)'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '429':
+          description: '`request rate limited`: more than 5 requests a minute from this IP'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /auth/password/reset:
+    post:
+      tags: [Auth]
+      operationId: resetPassword
+      summary: Choose a new password from a reset link
+      description: Sets the new password and logs the user in. Rate limited to 5 requests a minute per IP.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, password]
+              properties:
+                token:
+                  type: string
+                password:
+                  type: string
+                  minLength: 8
+      responses:
+        '200':
+          description: Password reset and user logged in (`message` is `password reset`).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/TokenPair'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          description: '`invalid token`: invalid, expired, not a reset token, already used, or the account no longer exists'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '429':
+          description: '`request rate limited`: more than 5 requests a minute from this IP'
           content:
             application/json:
               schema:
@@ -1970,6 +2065,39 @@ paths:
                             type: integer
         '500':
           $ref: '#/components/responses/ServerError'
+
+  /leases/reminders/run:
+    post:
+      tags: [Leases]
+      operationId: runLeaseReminders
+      summary: Send today's tenant reminders (development only)
+      description: |
+        Only registered when `APP_ENV=development`; no token required. Runs the daily reminder job (09:00
+        Lagos time) now: in-app reminders 30, 14 and 7 days before a lease ends; queued SMS for overdue rent
+        (then weekly) and for expired leases with no newer lease (then weekly, at most 4). Never repeats a
+        reminder.
+      responses:
+        '200':
+          description: Job ran (`message` is `reminders sent`).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [expiring, overdue, expired, skipped]
+                        properties:
+                          expiring:
+                            type: integer
+                          overdue:
+                            type: integer
+                          expired:
+                            type: integer
+                          skipped:
+                            type: integer
 
   /messages/recipients:
     get:

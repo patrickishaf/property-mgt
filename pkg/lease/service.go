@@ -27,9 +27,12 @@ type service struct {
 	installmentRepo *repository.InstallmentRepository
 	leaseRepo       *repository.LeaseRepository
 	logger          *slog.Logger
-	propertyRepo    *repository.PropertyRepository
-	tenantRepo      *repository.TenantRepository
-	unitRepo        *repository.UnitRepository
+	// messenger sends reminder messages; set by RegisterReminderJob.
+	messenger    reminderMessenger
+	propertyRepo *repository.PropertyRepository
+	reminderRepo *repository.LeaseReminderRepository
+	tenantRepo   *repository.TenantRepository
+	unitRepo     *repository.UnitRepository
 }
 
 func CreateService(
@@ -41,6 +44,7 @@ func CreateService(
 	tenantRepo *repository.TenantRepository,
 	propertyRepo *repository.PropertyRepository,
 	unitRepo *repository.UnitRepository,
+	reminderRepo *repository.LeaseReminderRepository,
 ) *service {
 	return &service{
 		cfg:             cfg,
@@ -49,6 +53,7 @@ func CreateService(
 		leaseRepo:       leaseRepo,
 		logger:          logger,
 		propertyRepo:    propertyRepo,
+		reminderRepo:    reminderRepo,
 		tenantRepo:      tenantRepo,
 		unitRepo:        unitRepo,
 	}

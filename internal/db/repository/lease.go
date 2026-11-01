@@ -212,6 +212,15 @@ func (this *LeaseRepository) FindActiveEndingBefore(before time.Time) ([]uint, e
 	return ids, err
 }
 
+// FindByStatusEndingBetween returns leases in the given status whose end date
+// falls in [from, to).
+func (this *LeaseRepository) FindByStatusEndingBetween(status string, from time.Time, to time.Time) ([]model.Lease, error) {
+	var leases []model.Lease
+	err := this.db.Where("status = ? AND end_date >= ? AND end_date < ?", status, from, to).
+		Order("id ASC").Find(&leases).Error
+	return leases, err
+}
+
 // FindLatestWithBalanceByTenant returns the tenant's most recent lease that still has rent owed.
 func (this *LeaseRepository) FindLatestWithBalanceByTenant(tenantID uint) (*model.Lease, error) {
 	var l model.Lease

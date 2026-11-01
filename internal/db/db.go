@@ -29,6 +29,7 @@ func Connect(cfg *config.DBConfig) *gorm.DB {
 		&model.IssueUpdate{},
 		&model.Job{},
 		&model.Lease{},
+		&model.LeaseReminder{},
 		&model.Message{},
 		&model.MessageRecipient{},
 		&model.Payment{},

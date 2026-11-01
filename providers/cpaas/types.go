@@ -33,4 +33,5 @@ const (
 	EmailTypeGeneralNotice        EmailType = "general_notice"
 	EmailTypeTenantInvite         EmailType = "tenant_invite"
 	EmailTypeManagerInvite        EmailType = "manager_invite"
+	EmailTypePasswordReset        EmailType = "password_reset"
 )

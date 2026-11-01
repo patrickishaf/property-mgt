@@ -28,3 +28,21 @@ type Lease struct {
 	TenantID             int
 	UnitNumber           string
 }
+
+// Lease reminder kinds. Each records one automatic reminder sent to a tenant
+// about a lease, so the daily reminder job never repeats itself.
+const (
+	LeaseReminderExpiring30  = "expiring_30"
+	LeaseReminderExpiring14  = "expiring_14"
+	LeaseReminderExpiring7   = "expiring_7"
+	LeaseReminderOverdueRent = "overdue_rent"
+	LeaseReminderExpired     = "lease_expired"
+)
+
+type LeaseReminder struct {
+	gorm.Model
+	Kind      string `gorm:"index:idx_lease_reminder,priority:2"`
+	LeaseID   uint   `gorm:"index:idx_lease_reminder,priority:1"`
+	MessageID uint
+	SentAt    time.Time
+}

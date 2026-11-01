@@ -136,6 +136,10 @@ func (this *httpHandler) getDue(c *gin.Context) {
 	net.Respond(c, this.svc.getDue(actor, query), "")
 }
 
+func (this *httpHandler) runReminders(c *gin.Context) {
+	net.Respond(c, this.svc.runReminders(), "reminders sent")
+}
+
 func (this *httpHandler) runExpiry(c *gin.Context) {
 	net.Respond(c, this.svc.runExpiry(), "expiry job ran")
 }

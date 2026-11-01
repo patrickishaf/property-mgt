@@ -22,7 +22,7 @@ The backend for Aventra, my private app for running my own properties: tenants, 
 
 ## Stack
 
-Go 1.26 · Gin · GORM on PostgreSQL · Redis · JWT · robfig/cron for background jobs · Air for hot reload.
+Go 1.26 · Gin · GORM on PostgreSQL · JWT · robfig/cron for background jobs · Air for hot reload.
 
 ## Running it locally
 
@@ -30,7 +30,6 @@ Go 1.26 · Gin · GORM on PostgreSQL · Redis · JWT · robfig/cron for backgrou
 
 - Go 1.26+
 - PostgreSQL (I use Postgres.app) with an empty database created
-- Redis
 - [Air](https://github.com/air-verse/air), for hot reload only: `go install github.com/air-verse/air@latest`, with `$(go env GOPATH)/bin` on your `PATH`
 
 ### Configuration
@@ -42,11 +41,12 @@ Settings are read from a `.env` file in the repo root (it is git-ignored). Keys 
 | `APP_ENV` | `development` | `development` turns on the dev-only routes below |
 | `APP_NAME` | | |
 | `PORT` | | API port, e.g. `3000` |
-| `WEB_APP_URL` | | Base URL of the web client; used in invite links |
+| `WEB_APP_URL` | | Base URL of the web client; used in invite and password reset links |
+| `ALLOWED_ORIGINS` | | Origins allowed to call the API from a browser, comma-separated (`*` for any). Empty means any origin in development and none elsewhere |
 | `JWT_SECRET_KEY` | | Signing key for all tokens |
 | `JWT_AT_EXPIRATION_MINS` | | Access token lifetime |
 | `JWT_RT_EXPIRATION_HOURS` | | Refresh token lifetime |
-| `PASSWORD_RESET_EXPIRATION_SECONDS` | | |
+| `PASSWORD_RESET_EXPIRATION_SECONDS` | | How long invite and password reset links stay valid |
 | `OTP_TIMEOUT_SECONDS` | `180` | |
 | `PAYMENT_CURRENCY` | `NGN` | |
 | `CHECKOUT_EXPIRY_MINUTES` | `30` | How long an online checkout stays payable |
@@ -58,7 +58,6 @@ Settings are read from a `.env` file in the repo root (it is git-ignored). Keys 
 | `DB_NAME` / `DB_USER` / `DB_PASSWORD` | | |
 | `SSL_MODE` | `disable` | `disable`, `require` or `verify-full` |
 | `DB_MAX_OPEN_CONNECTIONS` / `DB_MAX_IDLE_CONNECTIONS` / `DB_MAX_IDLE_CONNECTION_TIME` | — / `45` / `45` | |
-| `REDIS_URL` | | Or `REDIS_HOST`, `REDIS_PORT`, `REDIS_USER`, `REDIS_PASSWORD`, `REDIS_DB` |
 | `CPAAS_API_BASE_URL` / `CPAAS_API_KEY` | | Email/SMS provider |
 | `CPAAS_SENDER_ADDR` / `CPAAS_SENDER_NAME` | / `Aventra` | From address and name on outgoing email |
 | `BACHS_API_BASE_URL` / `BACHS_API_KEY` / `BACHS_WH_SECRET` | | Online payment provider. With no API key in development, checkouts are stubbed locally; outside development the URL and key are required |
@@ -113,12 +112,14 @@ These exist only when `APP_ENV=development`:
 | `GET /docs` | Swagger UI |
 | `POST /payments/checkout/:reference/complete` | Marks a checkout as paid, standing in for the payment provider's webhook |
 | `POST /leases/expiry/run` | Runs the daily lease-expiry job immediately |
+| `POST /leases/reminders/run` | Sends today's tenant reminders immediately |
 
 ## Background jobs
 
 | Job | Schedule | What it does |
 |---|---|---|
 | Lease expiry (`pkg/lease/expiry.go`) | daily | Ends active leases whose end date has passed |
+| Tenant reminders (`pkg/lease/reminders.go`) | daily, 09:00 Lagos time | In-app reminders 30, 14 and 7 days before a lease ends; queued SMS for overdue rent (then weekly) and for expired leases (then weekly, at most 4). Never repeats a reminder |
 | cpaas worker (`providers/cpaas/worker.go`) | every 5s | Picks up queued email/SMS jobs |
 
 ## Project layout
@@ -129,7 +130,6 @@ config/           env-driven config structs
 common/           shared types, errors, JWT, logger, scheduler
 internal/db/      connection + AutoMigrate, models, repositories (one model per repository)
 internal/net/     server, middleware (JWT, request ID), response helpers
-internal/cache/   Redis client
 pkg/<module>/     router.go → http_handler.go → service.go, with types.go for requests/responses
 providers/        external services: bachs (payments), cpaas (email/SMS queue and worker)
 docs/             API.md, openapi.yaml, ENTITIES.md
@@ -137,7 +137,7 @@ docs/             API.md, openapi.yaml, ENTITIES.md
 
 ## Not finished yet
 
-- **Sending email/SMS.** Jobs are queued, but the cpaas worker does not process them yet, so invite links and notifications are not delivered. SMS sending is a logging stub.
-- **Online payments.** Checkouts are created with Bachs and settled by its signed webhook (`POST /payments/webhooks/bachs`, verified with `BACHS_WH_SECRET`). Locally, without a Bachs key, checkouts are stubbed and finished with the dev-only complete route or a simulated webhook (unsigned webhooks are accepted only in development with no secret set). The tenant-facing payment screens aren't connected yet.
-- **Overview "Export report".** Not built yet.
-- **Settings.** `pkg/settings` is a placeholder.
+- **Sending email/SMS.** Jobs are queued, but the cpaas worker does not process them yet, so invite links, password reset links, notifications and SMS reminders are not delivered. SMS sending is a logging stub.
+- **Online payments.** Checkouts are created with Bachs and settled by its signed webhook (`POST /payments/webhooks/bachs`, verified with `BACHS_WH_SECRET`). Locally, without a Bachs key, checkouts are stubbed and finished with the dev-only complete route or a simulated webhook (unsigned webhooks are accepted only in development with no secret set).
+- **Lease management screens.** The API supports new leases for existing tenants, ending/terminating leases, rent and end-date changes and installment schedules; the web client doesn't offer them yet.
+- **Settings.** `pkg/settings` is a placeholder (its routes require a token but do nothing). Only profile editing (`PATCH /auth/user`) is real.

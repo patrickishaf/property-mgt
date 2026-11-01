@@ -13,7 +13,6 @@ type Config struct {
 	Bachs BachsConfig
 	Cpaas CpaasConfig
 	DB    DBConfig
-	Redis RedisConfig
 }
 
 var config Config

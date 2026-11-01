@@ -31,3 +31,13 @@ type updateUserReq struct {
 	LastName    *string `json:"lastName" binding:"omitempty,max=80"`
 	PhoneNumber *string `json:"phoneNumber" binding:"omitempty,max=30"`
 }
+
+type forgotPasswordReq struct {
+	AccountType string `json:"accountType" binding:"required,oneof=tenant admin"`
+	Email       string `json:"email" binding:"required,email"`
+}
+
+type resetPasswordReq struct {
+	Password string `json:"password" binding:"required,min=8"`
+	Token    string `json:"token" binding:"required"`
+}

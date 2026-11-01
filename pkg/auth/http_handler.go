@@ -72,6 +72,24 @@ func (this *httpHandler) refreshAuthToken(c *gin.Context) {
 	net.Respond(c, this.srv.refreshAuthToken(body), "token refreshed")
 }
 
+func (this *httpHandler) forgotPassword(c *gin.Context) {
+	var body forgotPasswordReq
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.IndentedJSON(400, net.ErrorResponse(common.ErrInvalidRequest, nil))
+		return
+	}
+	net.Respond(c, this.srv.forgotPassword(body), "if an account uses that email, a reset link is on its way")
+}
+
+func (this *httpHandler) resetPassword(c *gin.Context) {
+	var body resetPasswordReq
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.IndentedJSON(400, net.ErrorResponse(common.ErrInvalidRequest, nil))
+		return
+	}
+	net.Respond(c, this.srv.resetPassword(body), "password reset")
+}
+
 func (this *httpHandler) setPassword(c *gin.Context) {
 	var body setPasswordReq
 	if err := c.ShouldBindJSON(&body); err != nil {

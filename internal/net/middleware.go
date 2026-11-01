@@ -3,6 +3,7 @@ package net
 import (
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -29,19 +30,24 @@ func AttachRequestID() gin.HandlerFunc {
 	}
 }
 
+// perMinute is a limiter rate of n events a minute (rate.Limit counts per second).
+func perMinute(n int) rate.Limit {
+	return rate.Every(time.Minute / time.Duration(n))
+}
+
 func getLimiter(key string, requestsPerMinute, burstRequestLimit int) *rate.Limiter {
 	mu.Lock()
 	defer mu.Unlock()
 	l, exists := limiters[key]
 	if !exists {
-		l := rate.NewLimiter(rate.Limit(requestsPerMinute), burstRequestLimit)
+		l = rate.NewLimiter(perMinute(requestsPerMinute), burstRequestLimit)
 		limiters[key] = l
 	}
 	return l
 }
 
 func RateLimit(requestsPerMinute, burstRequestLimit int) gin.HandlerFunc {
-	limiter := rate.NewLimiter(rate.Limit(requestsPerMinute), burstRequestLimit)
+	limiter := rate.NewLimiter(perMinute(requestsPerMinute), burstRequestLimit)
 	return func(c *gin.Context) {
 		if limiter.Allow() {
 			c.Next()
@@ -53,9 +59,12 @@ func RateLimit(requestsPerMinute, burstRequestLimit int) gin.HandlerFunc {
 	}
 }
 
-func RateLimitByIPAddress(requestsPerMinute, burstRequestLimit int) gin.HandlerFunc {
+// RateLimitByIPAddress limits each client IP to requestsPerMinute (with bursts
+// of up to burstRequestLimit) on the routes it guards. name keeps separate
+// budgets per route group, so login attempts don't use up password resets.
+func RateLimitByIPAddress(name string, requestsPerMinute, burstRequestLimit int) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		key := c.ClientIP()
+		key := name + ":" + c.ClientIP()
 		limiter := getLimiter(key, requestsPerMinute, burstRequestLimit)
 
 		if limiter.Allow() {
@@ -71,7 +80,7 @@ func RateLimitByIPAddress(requestsPerMinute, burstRequestLimit int) gin.HandlerF
 func RateLimitByUsername(requestsPerMinute, burstRequestLimit int) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		username := c.GetString(common.REQUEST_USER_UNAME_KEY)
-		limiter := getLimiter(username, requestsPerMinute, burstRequestLimit)
+		limiter := getLimiter("user:"+username, requestsPerMinute, burstRequestLimit)
 
 		if limiter.Allow() {
 			c.Next()

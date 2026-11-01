@@ -12,11 +12,15 @@ const (
 	TokenTypeAccess  = "access"
 	TokenTypeInvite  = "invite"
 	TokenTypeRefresh = "refresh"
+	TokenTypeReset   = "reset"
 )
 
 type Claims struct {
 	Actor     Actor  `json:"actor"`
 	TokenType string `json:"typ"`
+	// PasswordVersion (reset tokens only) fingerprints the password the token
+	// was issued against, so the token stops working once the password changes.
+	PasswordVersion string `json:"pwv,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -70,6 +74,22 @@ func GenerateInviteJWT(cfg config.AppConfig, actor Actor) (string, error) {
 	claims := Claims{
 		Actor:     actor,
 		TokenType: TokenTypeInvite,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(expirationTime),
+		},
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString([]byte(cfg.JWTSecretKey))
+}
+
+// GenerateResetJWT creates a short-lived password reset token tied to the
+// user's current password (passwordVersion), which makes it single-use.
+func GenerateResetJWT(cfg config.AppConfig, actor Actor, passwordVersion string) (string, error) {
+	expirationTime := time.Now().Add(time.Duration(cfg.PwdResetExpirationSeconds) * time.Second)
+	claims := Claims{
+		Actor:           actor,
+		TokenType:       TokenTypeReset,
+		PasswordVersion: passwordVersion,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(expirationTime),
 		},
